@@ -1,0 +1,29 @@
+asyncapi: '2.6.0'
+info:
+  title: Support Tickets API
+  version: '1.0.0'
+  description: Emits lifecycle events for customer support tickets.
+servers:
+  production:
+    url: kafka://support-stream.example.com:9092
+    protocol: kafka
+defaultContentType: application/json
+channels:
+  tickets/events:
+    subscribe:
+      summary: Receive updates about ticket changes.
+      message:
+        name: TicketEvent
+        payload:
+          type: object
+          properties:
+            ticketId:
+              type: string
+            action:
+              type: string
+              enum: [opened, updated, escalated, closed]
+            performedBy:
+              type: string
+            performedAt:
+              type: string
+              format: date-time

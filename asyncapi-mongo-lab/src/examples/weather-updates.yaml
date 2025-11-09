@@ -1,0 +1,41 @@
+asyncapi: '2.6.0'
+info:
+  title: Weather Updates API
+  version: '1.0.0'
+  description: Provides near-real-time weather conditions for multiple regions.
+servers:
+  production:
+    url: amqps://weather.example.com:5671
+    protocol: amqp
+    security:
+      - user-password: []
+components:
+  securitySchemes:
+    user-password:
+      type: userPassword
+defaultContentType: application/json
+channels:
+  weather.{city}.conditions:
+    parameters:
+      city:
+        description: City identifier slug.
+        schema:
+          type: string
+    publish:
+      summary: Broadcast current conditions for the specified city.
+      message:
+        name: WeatherCondition
+        payload:
+          type: object
+          required:
+            - temperature
+            - humidity
+          properties:
+            temperature:
+              type: number
+              description: Celsius degrees.
+            humidity:
+              type: number
+              description: Percentage humidity.
+            description:
+              type: string
