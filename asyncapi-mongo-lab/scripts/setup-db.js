@@ -2,12 +2,14 @@
 
 require('dotenv').config();
 const MongoService = require('../src/services/mongo-service');
+const AsyncAPIProcessor = require('../src/processors/asyncapi-processor');
 const fs = require('fs-extra');
 const path = require('path');
 
 class DatabaseSetup {
   constructor() {
     this.mongoService = new MongoService();
+    this.asyncapiProcessor = new AsyncAPIProcessor();
   }
 
   /**
@@ -29,45 +31,22 @@ class DatabaseSetup {
       await fs.ensureDir('logs');
       console.log('📁 Created logs directory');
 
-      // Test database connection
-      console.log('🔍 Testing database connection...');
-      const testDoc = {
-        metadata: {
-          title: 'Test Document',
-          version: '1.0.0',
-          description: 'Test document for setup verification',
-          protocol: 'test',
-          channelsCount: 0,
-          serversCount: 0,
-          createdAt: new Date(),
-          updatedAt: new Date(),
-          processedAt: new Date()
-        },
-        searchableFields: {
-          title: 'test document',
-          description: 'test document for setup verification',
-          version: '1.0.0',
-          protocol: 'test',
-          tags: ['test', 'setup']
-        }
-      };
+      // Import bundled AsyncAPI examples
+      const importSummary = await this.importAsyncAPIExamples();
 
-      const result = await this.mongoService.insertAsyncAPIDocument({
-        original: JSON.stringify(testDoc, null, 2),
-        normalized: testDoc
-      });
-      console.log(`✅ Test document inserted with ID: ${result.insertedId}`);
-
-      // Clean up test document
-      await this.mongoService.deleteAsyncAPIDocument(result.insertedId.toString());
-      console.log('🧹 Test document cleaned up');
-
-      console.log('\n✅ Database setup completed successfully!');
       console.log('\n📋 Setup Summary:');
       console.log('   - MongoDB connection established');
       console.log('   - Database indexes created');
       console.log('   - Logs directory created');
-      console.log('   - Connection test passed');
+      console.log(`   - AsyncAPI examples imported: ${importSummary.inserted}`);
+      if (importSummary.skipped > 0) {
+        console.log(`   - Existing examples skipped: ${importSummary.skipped}`);
+      }
+      if (importSummary.errors.length > 0) {
+        console.log(`   - Imports with errors: ${importSummary.errors.length}`);
+      }
+
+      console.log('\n✅ Database setup completed successfully!');
 
     } catch (error) {
       console.error('❌ Database setup failed:', error.message);
@@ -75,6 +54,104 @@ class DatabaseSetup {
     } finally {
       await this.mongoService.close();
     }
+  }
+
+  /**
+   * Import AsyncAPI examples from the examples directory
+   * @returns {Promise<{inserted: number, skipped: number, errors: Array}>} Import summary
+   */
+  async importAsyncAPIExamples() {
+    const examplesDir = path.join(__dirname, '..', 'src', 'examples');
+    const summary = {
+      inserted: 0,
+      skipped: 0,
+      errors: []
+    };
+
+    if (!await fs.pathExists(examplesDir)) {
+      console.log('ℹ️ No AsyncAPI examples directory found to import.');
+      return summary;
+    }
+
+    console.log('\n📥 Importing bundled AsyncAPI examples...');
+
+    const files = (await fs.readdir(examplesDir))
+      .filter(file => /\.(json|ya?ml)$/i.test(file))
+      .sort();
+
+    if (files.length === 0) {
+      console.log('ℹ️ No AsyncAPI example files detected.');
+      return summary;
+    }
+
+    console.log(`📦 Found ${files.length} AsyncAPI example${files.length === 1 ? '' : 's'} in the examples directory.`);
+
+    const normalizedCollection = this.mongoService.getCollection('normalized');
+
+    for (const [index, file] of files.entries()) {
+      const filePath = path.join(examplesDir, file);
+      const extension = path.extname(file).replace('.', '').toLowerCase() || 'json';
+      const progressLabel = `${index + 1}/${files.length}`;
+
+      try {
+        const alreadyImported = await normalizedCollection.findOne({ 'source.filename': file });
+        if (alreadyImported) {
+          summary.skipped += 1;
+          console.log(`${progressLabel} ↩️  Skipping already imported example: ${file}`);
+          continue;
+        }
+
+        const processed = await this.asyncapiProcessor.processAsyncAPIFile(filePath, 'json');
+        const importTimestamp = new Date();
+
+        const metadata = {
+          ...processed.normalized.metadata,
+          sourceFile: file,
+          sourceFormat: extension,
+          importPath: path.relative(process.cwd(), filePath),
+          importedAt: importTimestamp,
+          convertedFormat: 'json'
+        };
+
+        const normalizedDocument = {
+          ...processed.normalized,
+          metadata,
+          source: {
+            filename: file,
+            relativePath: path.relative(process.cwd(), filePath),
+            format: extension,
+            importedAt: importTimestamp
+          },
+          conversion: {
+            targetFormat: 'json',
+            convertedAt: importTimestamp
+          }
+        };
+
+        const originalDocument = {
+          filename: file,
+          relativePath: path.relative(process.cwd(), filePath),
+          format: extension,
+          content: processed.original,
+          converted: processed.converted,
+          importedAt: importTimestamp
+        };
+
+        await this.mongoService.insertAsyncAPIDocument({
+          original: originalDocument,
+          normalized: normalizedDocument,
+          metadata
+        });
+
+        summary.inserted += 1;
+        console.log(`${progressLabel} ✅ Imported AsyncAPI example: ${file}`);
+      } catch (error) {
+        summary.errors.push({ file, message: error.message });
+        console.error(`${progressLabel} ❌ Failed to import ${file}:`, error.message);
+      }
+    }
+
+    return summary;
   }
 
   /**
