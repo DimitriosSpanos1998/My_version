@@ -58,12 +58,16 @@ class AsyncAPIMongoLab {
         
         // Process the AsyncAPI file
         const result = await this.processor.processAsyncAPIFile(filePath, 'json');
-        
-        // Insert into MongoDB
-        const insertResult = await this.mongoService.insertAsyncAPIDocument(result.normalized);
-        
+
+        // Insert into MongoDB (original, normalized, and metadata collections)
+        const insertResult = await this.mongoService.insertAsyncAPIDocument(result);
+
         console.log(`✅ Successfully processed and stored: ${result.normalized.metadata.title} v${result.normalized.metadata.version}`);
         console.log(`   Document ID: ${insertResult.insertedId}`);
+        console.log(`   Metadata ID: ${insertResult.metadataId}`);
+        if (insertResult.originalId) {
+          console.log(`   Original ID: ${insertResult.originalId}`);
+        }
         console.log(`   Protocol: ${result.normalized.metadata.protocol}`);
         console.log(`   Channels: ${result.normalized.metadata.channelsCount}`);
         console.log(`   Servers: ${result.normalized.metadata.serversCount}`);
