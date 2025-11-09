@@ -166,30 +166,24 @@ class AsyncAPIProcessor {
    * @param {string} content - AsyncAPI content as string
    * @returns {Promise<Object>} Parsed AsyncAPI object
    */
-  async parseAsyncAPI(content, filePath) {
-    try {
-      // First, parse YAML to get the raw object
-      let parsedYAML;
-      if (filePath.endsWith('.yaml') || filePath.endsWith('.yml')) {
-        parsedYAML = yaml.parse(content);
-      } else {
-        parsedYAML = JSON.parse(content);
-      }
-
-      // Now use the AsyncAPI parser to validate (optional but good practice)
-      const parser = new Parser();
-      await parser.parse(parsedYAML);
-      
-      console.log('✅ AsyncAPI specification parsed successfully');
-      
-      // Return the parsed YAML/JSON as plain object
-      return parsedYAML;
-    } catch (error) {
-      console.error('❌ Error parsing AsyncAPI:', error.message);
-      throw error;
+ // 1) parse ως string και κράτα το parsed.document
+async parseAsyncAPI(content, filePath) {
+  try {
+    const parser = new Parser();
+    // Δώσε string απευθείας (JSON ή YAML)
+    const { document, diagnostics } = await parser.parse(content);
+    if (diagnostics?.length) {
+      console.warn('Parser diagnostics:', diagnostics);
     }
+    console.log('✅ AsyncAPI specification parsed successfully');
+    // Πάρε το "raw" object αν το χρειάζεσαι:
+    const plain = document.json(); // ή document.yaml() αν σε βολεύει κείμενο
+    return plain; // επιστρέφει καθαρό JSON object της spec
+  } catch (error) {
+    console.error('❌ Error parsing AsyncAPI:', error.message);
+    throw error;
   }
-
+}
   /**
    * Convert AsyncAPI to different format
    Basically, 'convert' means stringifying the JSON or converting to YAML
@@ -197,45 +191,71 @@ class AsyncAPIProcessor {
    * @param {string} targetFormat - Target format ('json', 'yaml')
    * @returns {string} Converted AsyncAPI as string
    */
-  async convertAsyncAPI(originalContent, parsedSpec, targetFormat = 'json') {
-    try {
-      if (!['json', 'yaml'].includes(targetFormat)) {
-        throw new Error(`Unsupported format: ${targetFormat}`);
-      }
-
-      const targetVersion = '3.0.0';
-      const currentVersion = parsedSpec?.asyncapi || parsedSpec?.version;
-      let convertedObject = parsedSpec;
-      let wasConverted = false;
-
-      if (typeof currentVersion !== 'string' || !currentVersion.startsWith('3.')) {
-        const convertedDocument = await convert(originalContent, targetVersion);
-        convertedObject = yaml.parse(convertedDocument);
-        wasConverted = true;
-      }
-
-      const stringified =
-        targetFormat === 'yaml'
-          ? yaml.stringify(convertedObject)
-          : JSON.stringify(convertedObject, null, 2);
-
-      const resultingVersion = convertedObject?.asyncapi || convertedObject?.version;
-
-      console.log(
-        `🔄 Converted AsyncAPI to version ${resultingVersion || targetVersion} (${targetFormat.toUpperCase()})`
-      );
-
-      return {
-        content: stringified,
-        document: convertedObject,
-        version: resultingVersion || targetVersion,
-        wasConverted
-      };
-    } catch (error) {
-      console.error('❌ Error converting AsyncAPI specification:', error.message);
-      throw error;
+async convertAsyncAPI(originalContent, parsedSpec, targetFormat = 'json') {
+  try {
+    if (!['json', 'yaml'].includes(targetFormat)) {
+      throw new Error(`Unsupported format: ${targetFormat}`);
     }
+
+    const targetVersion = '3.0.0';
+    const currentVersion = parsedSpec?.asyncapi || parsedSpec?.version;
+
+    let convertedObject = parsedSpec;
+    let wasConverted = false;
+
+    // 1) ΜΟΝΟ αν δεν είναι ήδη v3
+    if (typeof currentVersion !== 'string' || !currentVersion.startsWith('3.')) {
+      const sourceString = typeof originalContent === 'string'
+        ? originalContent
+        : JSON.stringify(originalContent, null, 2);
+
+      const result = await convert(sourceString, targetVersion);
+      // ---- Robust normalization of converter output ----
+      let maybeText = null;
+      let maybeObj = null;
+
+      if (typeof result === 'string') {
+        maybeText = result;
+      } else if (result && typeof result === 'object') {
+        // κοινοί πιθανοί τρόποι που γυρνάει ο converter
+        if (typeof result.converted === 'string') {
+          maybeText = result.converted;
+        } else if (typeof result.document === 'string') {
+          maybeText = result.document;
+        } else if (result.document && typeof result.document === 'object') {
+          maybeObj = result.document;
+        } else if (result.content && typeof result.content === 'string') {
+          maybeText = result.content;
+        } else {
+          // last resort: αν είναι ήδη JSON object, χρησιμοποίησέ το
+          maybeObj = result;
+        }
+      }
+
+      if (maybeText != null) {
+        convertedObject = maybeText.trim().startsWith('{')
+          ? JSON.parse(maybeText)
+          : yaml.parse(maybeText);
+      } else if (maybeObj != null) {
+        convertedObject = maybeObj; // ήδη object
+      } else {
+        throw new Error('Unexpected converter output type');
+      }
+
+      wasConverted = true;
+    }
+
+    const outText = targetFormat === 'yaml'
+      ? yaml.stringify(convertedObject)
+      : JSON.stringify(convertedObject, null, 2);
+
+    const resultingVersion = convertedObject?.asyncapi || convertedObject?.version || '3.0.0';
+    return { content: outText, document: convertedObject, version: resultingVersion, wasConverted };
+  } catch (error) {
+    console.error('❌ Error converting AsyncAPI specification:', error.message);
+    throw error;
   }
+}
 
   /**
    * Normalize AsyncAPI data for MongoDB storage
@@ -394,3 +414,4 @@ class AsyncAPIProcessor {
 }
 
 module.exports = AsyncAPIProcessor;
+
