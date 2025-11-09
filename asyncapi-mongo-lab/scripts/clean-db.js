@@ -16,26 +16,46 @@ class DatabaseCleaner {
       console.log('🧹 Cleaning MongoDB database...\n');
 
       await this.mongoService.connect();
-      const collection = this.mongoService.getCollection();
-      
-      // Get count before deletion
-      const countBefore = await collection.countDocuments();
-      console.log(`📊 Documents before cleanup: ${countBefore}`);
+      const normalizedCollection = this.mongoService.getCollection('normalized');
+      const metadataCollection = this.mongoService.getCollection('metadata');
+      const originalCollection = this.mongoService.getCollection('original');
 
-      if (countBefore === 0) {
+      const [normalizedBefore, metadataBefore, originalBefore] = await Promise.all([
+        normalizedCollection.countDocuments(),
+        metadataCollection.countDocuments(),
+        originalCollection.countDocuments()
+      ]);
+
+      console.log(`📊 Normalized before cleanup: ${normalizedBefore}`);
+      console.log(`📊 Metadata before cleanup: ${metadataBefore}`);
+      console.log(`📊 Original before cleanup: ${originalBefore}`);
+
+      if (normalizedBefore === 0 && metadataBefore === 0 && originalBefore === 0) {
         console.log('✅ Database is already clean!');
         return;
       }
 
-      // Delete all documents
-      const result = await collection.deleteMany({});
-      console.log(`🗑️ Deleted ${result.deletedCount} documents`);
+      const [normalizedResult, metadataResult, originalResult] = await Promise.all([
+        normalizedCollection.deleteMany({}),
+        metadataCollection.deleteMany({}),
+        originalCollection.deleteMany({})
+      ]);
 
-      // Verify cleanup
-      const countAfter = await collection.countDocuments();
-      console.log(`📊 Documents after cleanup: ${countAfter}`);
+      console.log(`🗑️ Deleted ${normalizedResult.deletedCount} normalized documents`);
+      console.log(`🗑️ Deleted ${metadataResult.deletedCount} metadata documents`);
+      console.log(`🗑️ Deleted ${originalResult.deletedCount} original documents`);
 
-      if (countAfter === 0) {
+      const [normalizedAfter, metadataAfter, originalAfter] = await Promise.all([
+        normalizedCollection.countDocuments(),
+        metadataCollection.countDocuments(),
+        originalCollection.countDocuments()
+      ]);
+
+      console.log(`📊 Normalized after cleanup: ${normalizedAfter}`);
+      console.log(`📊 Metadata after cleanup: ${metadataAfter}`);
+      console.log(`📊 Original after cleanup: ${originalAfter}`);
+
+      if (normalizedAfter === 0 && metadataAfter === 0 && originalAfter === 0) {
         console.log('✅ Database cleaned successfully!');
       } else {
         console.log('⚠️ Some documents may still remain');
@@ -57,27 +77,44 @@ class DatabaseCleaner {
       console.log(`🧹 Cleaning documents older than ${days} days...\n`);
 
       await this.mongoService.connect();
-      const collection = this.mongoService.getCollection();
-      
+      const normalizedCollection = this.mongoService.getCollection('normalized');
+      const metadataCollection = this.mongoService.getCollection('metadata');
+      const originalCollection = this.mongoService.getCollection('original');
+
       const cutoffDate = new Date();
       cutoffDate.setDate(cutoffDate.getDate() - days);
 
-      // Get count before deletion
-      const countBefore = await collection.countDocuments({
-        'metadata.createdAt': { $lt: cutoffDate }
-      });
-      console.log(`📊 Documents older than ${days} days: ${countBefore}`);
+      const normalizedFilter = { 'metadata.createdAt': { $lt: cutoffDate } };
 
-      if (countBefore === 0) {
+      const normalizedBefore = await normalizedCollection.countDocuments(normalizedFilter);
+      console.log(`📊 Normalized docs older than ${days} days: ${normalizedBefore}`);
+
+      if (normalizedBefore === 0) {
         console.log('✅ No old documents to clean!');
         return;
       }
 
-      // Delete old documents
-      const result = await collection.deleteMany({
-        'metadata.createdAt': { $lt: cutoffDate }
-      });
-      console.log(`🗑️ Deleted ${result.deletedCount} old documents`);
+      const docsToDelete = await normalizedCollection
+        .find(normalizedFilter, { projection: { metadataId: 1 } })
+        .toArray();
+
+      const metadataIds = docsToDelete
+        .map(doc => doc.metadataId)
+        .filter(Boolean);
+
+      const [normalizedResult, metadataResult, originalResult] = await Promise.all([
+        normalizedCollection.deleteMany({ _id: { $in: docsToDelete.map(doc => doc._id) } }),
+        metadataIds.length
+          ? metadataCollection.deleteMany({ _id: { $in: metadataIds } })
+          : Promise.resolve({ deletedCount: 0 }),
+        metadataIds.length
+          ? originalCollection.deleteMany({ metadataId: { $in: metadataIds } })
+          : Promise.resolve({ deletedCount: 0 })
+      ]);
+
+      console.log(`🗑️ Deleted ${normalizedResult.deletedCount} normalized documents`);
+      console.log(`🗑️ Deleted ${metadataResult.deletedCount || 0} metadata documents`);
+      console.log(`🗑️ Deleted ${originalResult.deletedCount || 0} original documents`);
 
       console.log('✅ Old documents cleaned successfully!');
 

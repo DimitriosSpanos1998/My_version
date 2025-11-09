@@ -52,7 +52,10 @@ class DatabaseSetup {
         }
       };
 
-      const result = await this.mongoService.insertAsyncAPIDocument(testDoc);
+      const result = await this.mongoService.insertAsyncAPIDocument({
+        original: JSON.stringify(testDoc, null, 2),
+        normalized: testDoc
+      });
       console.log(`✅ Test document inserted with ID: ${result.insertedId}`);
 
       // Clean up test document
@@ -82,10 +85,19 @@ class DatabaseSetup {
       console.log('🧹 Cleaning database...\n');
 
       await this.mongoService.connect();
-      const collection = this.mongoService.getCollection();
-      
-      const result = await collection.deleteMany({});
-      console.log(`🗑️ Deleted ${result.deletedCount} documents`);
+      const normalizedCollection = this.mongoService.getCollection('normalized');
+      const metadataCollection = this.mongoService.getCollection('metadata');
+      const originalCollection = this.mongoService.getCollection('original');
+
+      const [normalizedResult, metadataResult, originalResult] = await Promise.all([
+        normalizedCollection.deleteMany({}),
+        metadataCollection.deleteMany({}),
+        originalCollection.deleteMany({})
+      ]);
+
+      console.log(`🗑️ Deleted ${normalizedResult.deletedCount} normalized documents`);
+      console.log(`🗑️ Deleted ${metadataResult.deletedCount} metadata documents`);
+      console.log(`🗑️ Deleted ${originalResult.deletedCount} original documents`);
 
       console.log('✅ Database cleaned successfully!');
     } catch (error) {
@@ -104,14 +116,23 @@ class DatabaseSetup {
       console.log('📊 Database Status:\n');
 
       await this.mongoService.connect();
-      const collection = this.mongoService.getCollection();
-      
-      const count = await collection.countDocuments();
-      console.log(`📈 Total documents: ${count}`);
+      const normalizedCollection = this.mongoService.getCollection('normalized');
+      const metadataCollection = this.mongoService.getCollection('metadata');
+      const originalCollection = this.mongoService.getCollection('original');
 
-      if (count > 0) {
+      const [normalizedCount, metadataCount, originalCount] = await Promise.all([
+        normalizedCollection.countDocuments(),
+        metadataCollection.countDocuments(),
+        originalCollection.countDocuments()
+      ]);
+
+      console.log(`📈 Normalized documents: ${normalizedCount}`);
+      console.log(`📈 Metadata documents: ${metadataCount}`);
+      console.log(`📈 Original documents: ${originalCount}`);
+
+      if (normalizedCount > 0) {
         const stats = await this.mongoService.getDocumentStatistics();
-        
+
         console.log('\n🌐 Protocol distribution:');
         stats.protocolDistribution.forEach(protocol => {
           console.log(`   ${protocol._id}: ${protocol.count}`);
