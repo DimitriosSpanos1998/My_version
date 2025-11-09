@@ -1,0 +1,287 @@
+{
+  "asyncapi": "2.6.0",
+  "info": {
+    "title": "MQTT Broker API",
+    "version": "2.1.0",
+    "description": "This is a sample AsyncAPI specification for an MQTT broker. It demonstrates IoT device communication patterns using MQTT protocol.",
+    "contact": {
+      "name": "IoT Team",
+      "email": "iot@example.com"
+    },
+    "license": {
+      "name": "Apache 2.0",
+      "url": "https://www.apache.org/licenses/LICENSE-2.0"
+    }
+  },
+  "tags": [
+    {
+      "name": "iot",
+      "description": "Internet of Things operations"
+    },
+    {
+      "name": "sensor",
+      "description": "Sensor data operations"
+    },
+    {
+      "name": "device",
+      "description": "Device management operations"
+    }
+  ],
+  "servers": {
+    "production": {
+      "url": "mqtt://broker.example.com:1883",
+      "protocol": "mqtt",
+      "description": "Production MQTT broker"
+    },
+    "development": {
+      "url": "mqtt://localhost:1883",
+      "protocol": "mqtt",
+      "description": "Development MQTT broker"
+    },
+    "secure": {
+      "url": "mqtts://broker.example.com:8883",
+      "protocol": "mqtts",
+      "description": "Secure MQTT broker with TLS"
+    }
+  },
+  "channels": {
+    "sensors/{sensorId}/temperature": {
+      "description": "Channel for temperature sensor data",
+      "publish": {
+        "message": {
+          "$ref": "#/components/messages/TemperatureData"
+        }
+      },
+      "parameters": {
+        "sensorId": {
+          "description": "The sensor ID",
+          "schema": {
+            "type": "string",
+            "pattern": "^sensor_[0-9]+$"
+          }
+        }
+      }
+    },
+    "sensors/{sensorId}/humidity": {
+      "description": "Channel for humidity sensor data",
+      "publish": {
+        "message": {
+          "$ref": "#/components/messages/HumidityData"
+        }
+      },
+      "parameters": {
+        "sensorId": {
+          "description": "The sensor ID",
+          "schema": {
+            "type": "string",
+            "pattern": "^sensor_[0-9]+$"
+          }
+        }
+      }
+    },
+    "devices/{deviceId}/status": {
+      "description": "Channel for device status updates",
+      "publish": {
+        "message": {
+          "$ref": "#/components/messages/DeviceStatus"
+        }
+      },
+      "parameters": {
+        "deviceId": {
+          "description": "The device ID",
+          "schema": {
+            "type": "string",
+            "pattern": "^device_[0-9]+$"
+          }
+        }
+      }
+    },
+    "devices/{deviceId}/commands": {
+      "description": "Channel for sending commands to devices",
+      "subscribe": {
+        "message": {
+          "$ref": "#/components/messages/DeviceCommand"
+        }
+      },
+      "parameters": {
+        "deviceId": {
+          "description": "The device ID",
+          "schema": {
+            "type": "string",
+            "pattern": "^device_[0-9]+$"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "messages": {
+      "TemperatureData": {
+        "name": "TemperatureData",
+        "title": "Temperature Sensor Data",
+        "summary": "Temperature reading from a sensor",
+        "contentType": "application/json",
+        "payload": {
+          "$ref": "#/components/schemas/TemperaturePayload"
+        }
+      },
+      "HumidityData": {
+        "name": "HumidityData",
+        "title": "Humidity Sensor Data",
+        "summary": "Humidity reading from a sensor",
+        "contentType": "application/json",
+        "payload": {
+          "$ref": "#/components/schemas/HumidityPayload"
+        }
+      },
+      "DeviceStatus": {
+        "name": "DeviceStatus",
+        "title": "Device Status Update",
+        "summary": "Status update from a device",
+        "contentType": "application/json",
+        "payload": {
+          "$ref": "#/components/schemas/DeviceStatusPayload"
+        }
+      },
+      "DeviceCommand": {
+        "name": "DeviceCommand",
+        "title": "Device Command",
+        "summary": "Command sent to a device",
+        "contentType": "application/json",
+        "payload": {
+          "$ref": "#/components/schemas/DeviceCommandPayload"
+        }
+      }
+    },
+    "schemas": {
+      "TemperaturePayload": {
+        "type": "object",
+        "properties": {
+          "sensorId": {
+            "type": "string",
+            "description": "The sensor ID",
+            "example": "sensor_001"
+          },
+          "temperature": {
+            "type": "number",
+            "description": "Temperature in Celsius",
+            "example": 23.5
+          },
+          "unit": {
+            "type": "string",
+            "enum": ["celsius", "fahrenheit"],
+            "description": "Temperature unit",
+            "example": "celsius"
+          },
+          "timestamp": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the reading was taken",
+            "example": "2023-01-01T12:00:00Z"
+          },
+          "location": {
+            "type": "object",
+            "properties": {
+              "latitude": {
+                "type": "number",
+                "example": 40.7128
+              },
+              "longitude": {
+                "type": "number",
+                "example": -74.0060
+              }
+            }
+          }
+        },
+        "required": ["sensorId", "temperature", "unit", "timestamp"]
+      },
+      "HumidityPayload": {
+        "type": "object",
+        "properties": {
+          "sensorId": {
+            "type": "string",
+            "description": "The sensor ID",
+            "example": "sensor_002"
+          },
+          "humidity": {
+            "type": "number",
+            "description": "Humidity percentage",
+            "minimum": 0,
+            "maximum": 100,
+            "example": 65.2
+          },
+          "timestamp": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the reading was taken",
+            "example": "2023-01-01T12:00:00Z"
+          }
+        },
+        "required": ["sensorId", "humidity", "timestamp"]
+      },
+      "DeviceStatusPayload": {
+        "type": "object",
+        "properties": {
+          "deviceId": {
+            "type": "string",
+            "description": "The device ID",
+            "example": "device_001"
+          },
+          "status": {
+            "type": "string",
+            "enum": ["online", "offline", "maintenance", "error"],
+            "description": "Device status",
+            "example": "online"
+          },
+          "batteryLevel": {
+            "type": "number",
+            "description": "Battery level percentage",
+            "minimum": 0,
+            "maximum": 100,
+            "example": 85
+          },
+          "lastSeen": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the device was last seen",
+            "example": "2023-01-01T12:00:00Z"
+          },
+          "firmwareVersion": {
+            "type": "string",
+            "description": "Device firmware version",
+            "example": "1.2.3"
+          }
+        },
+        "required": ["deviceId", "status", "lastSeen"]
+      },
+      "DeviceCommandPayload": {
+        "type": "object",
+        "properties": {
+          "deviceId": {
+            "type": "string",
+            "description": "The device ID",
+            "example": "device_001"
+          },
+          "command": {
+            "type": "string",
+            "enum": ["restart", "update", "calibrate", "reset"],
+            "description": "Command to execute",
+            "example": "restart"
+          },
+          "parameters": {
+            "type": "object",
+            "description": "Command parameters",
+            "example": { "delay": 5 }
+          },
+          "timestamp": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the command was sent",
+            "example": "2023-01-01T12:00:00Z"
+          }
+        },
+        "required": ["deviceId", "command", "timestamp"]
+      }
+    }
+  }
+}

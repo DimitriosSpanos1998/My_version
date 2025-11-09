@@ -1,0 +1,219 @@
+asyncapi: 2.6.0
+info:
+  title: User Service API
+  version: 1.0.0
+  description: |
+    This is a sample AsyncAPI specification for a user service.
+    It demonstrates how to define channels, messages, and operations
+    for a real-time API using WebSocket protocol.
+  contact:
+    name: API Support
+    email: support@example.com
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+
+tags:
+  - name: user
+    description: User management operations
+  - name: notification
+    description: Real-time notifications
+
+servers:
+  production:
+    url: ws://api.example.com/ws
+    protocol: ws
+    description: Production WebSocket server
+  development:
+    url: ws://localhost:3000/ws
+    protocol: ws
+    description: Development WebSocket server
+
+channels:
+  user/created:
+    description: Channel for user creation events
+    publish:
+      message:
+        $ref: '#/components/messages/UserCreated'
+    parameters:
+      userId:
+        description: The user ID
+        schema:
+          type: string
+          pattern: '^[0-9a-f]{24}$'
+
+  user/updated:
+    description: Channel for user update events
+    publish:
+      message:
+        $ref: '#/components/messages/UserUpdated'
+    parameters:
+      userId:
+        description: The user ID
+        schema:
+          type: string
+          pattern: '^[0-9a-f]{24}$'
+
+  user/deleted:
+    description: Channel for user deletion events
+    publish:
+      message:
+        $ref: '#/components/messages/UserDeleted'
+    parameters:
+      userId:
+        description: The user ID
+        schema:
+          type: string
+          pattern: '^[0-9a-f]{24}$'
+
+  notifications:
+    description: Channel for sending notifications to users
+    subscribe:
+      message:
+        $ref: '#/components/messages/Notification'
+    parameters:
+      userId:
+        description: The user ID
+        schema:
+          type: string
+          pattern: '^[0-9a-f]{24}$'
+
+components:
+  messages:
+    UserCreated:
+      name: UserCreated
+      title: User Created Event
+      summary: Event sent when a new user is created
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/UserCreatedPayload'
+
+    UserUpdated:
+      name: UserUpdated
+      title: User Updated Event
+      summary: Event sent when a user is updated
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/UserUpdatedPayload'
+
+    UserDeleted:
+      name: UserDeleted
+      title: User Deleted Event
+      summary: Event sent when a user is deleted
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/UserDeletedPayload'
+
+    Notification:
+      name: Notification
+      title: User Notification
+      summary: Real-time notification sent to a user
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/NotificationPayload'
+
+  schemas:
+    UserCreatedPayload:
+      type: object
+      properties:
+        id:
+          type: string
+          description: The user ID
+          example: "507f1f77bcf86cd799439011"
+        email:
+          type: string
+          format: email
+          description: User's email address
+          example: "john.doe@example.com"
+        name:
+          type: string
+          description: User's full name
+          example: "John Doe"
+        createdAt:
+          type: string
+          format: date-time
+          description: When the user was created
+          example: "2023-01-01T00:00:00Z"
+      required:
+        - id
+        - email
+        - name
+        - createdAt
+
+    UserUpdatedPayload:
+      type: object
+      properties:
+        id:
+          type: string
+          description: The user ID
+          example: "507f1f77bcf86cd799439011"
+        email:
+          type: string
+          format: email
+          description: User's email address
+          example: "john.doe@example.com"
+        name:
+          type: string
+          description: User's full name
+          example: "John Doe"
+        updatedAt:
+          type: string
+          format: date-time
+          description: When the user was updated
+          example: "2023-01-01T12:00:00Z"
+      required:
+        - id
+        - updatedAt
+
+    UserDeletedPayload:
+      type: object
+      properties:
+        id:
+          type: string
+          description: The user ID
+          example: "507f1f77bcf86cd799439011"
+        deletedAt:
+          type: string
+          format: date-time
+          description: When the user was deleted
+          example: "2023-01-01T18:00:00Z"
+      required:
+        - id
+        - deletedAt
+
+    NotificationPayload:
+      type: object
+      properties:
+        id:
+          type: string
+          description: The notification ID
+          example: "507f1f77bcf86cd799439012"
+        userId:
+          type: string
+          description: The user ID
+          example: "507f1f77bcf86cd799439011"
+        type:
+          type: string
+          enum: [info, warning, error, success]
+          description: Notification type
+          example: "info"
+        title:
+          type: string
+          description: Notification title
+          example: "Welcome!"
+        message:
+          type: string
+          description: Notification message
+          example: "Welcome to our service!"
+        timestamp:
+          type: string
+          format: date-time
+          description: When the notification was sent
+          example: "2023-01-01T00:00:00Z"
+      required:
+        - id
+        - userId
+        - type
+        - title
+        - message
+        - timestamp
