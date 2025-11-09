@@ -1,0 +1,55 @@
+{
+  "asyncapi": "2.6.0",
+  "info": {
+    "title": "IoT Sensors API",
+    "version": "1.0.0",
+    "description": "Streams readings from smart building sensors."
+  },
+  "servers": {
+    "production": {
+      "url": "mqtt://sensors.example.com:1883",
+      "protocol": "mqtt"
+    }
+  },
+  "defaultContentType": "application/json",
+  "channels": {
+    "building/{buildingId}/device/{deviceId}/reading": {
+      "parameters": {
+        "buildingId": {
+          "schema": {
+            "type": "string"
+          }
+        },
+        "deviceId": {
+          "schema": {
+            "type": "string"
+          }
+        }
+      },
+      "publish": {
+        "summary": "Send measurement from a specific sensor.",
+        "message": {
+          "name": "SensorReading",
+          "payload": {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string"
+              },
+              "value": {
+                "type": "number"
+              },
+              "unit": {
+                "type": "string"
+              },
+              "recordedAt": {
+                "type": "string",
+                "format": "date-time"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

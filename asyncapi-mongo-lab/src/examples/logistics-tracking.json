@@ -1,0 +1,47 @@
+{
+  "asyncapi": "2.6.0",
+  "info": {
+    "title": "Logistics Tracking API",
+    "version": "1.0.0",
+    "description": "Tracks parcel status updates throughout the delivery journey."
+  },
+  "servers": {
+    "production": {
+      "url": "mqtt://logistics-broker.example.com:1883",
+      "protocol": "mqtt"
+    }
+  },
+  "defaultContentType": "application/json",
+  "channels": {
+    "shipments/{trackingNumber}/status": {
+      "parameters": {
+        "trackingNumber": {
+          "schema": {
+            "type": "string"
+          }
+        }
+      },
+      "subscribe": {
+        "summary": "Receive updates for a specific parcel.",
+        "message": {
+          "name": "ShipmentStatus",
+          "payload": {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string"
+              },
+              "location": {
+                "type": "string"
+              },
+              "updatedAt": {
+                "type": "string",
+                "format": "date-time"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
