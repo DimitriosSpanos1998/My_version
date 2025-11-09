@@ -105,7 +105,7 @@ class DatabaseSetup {
         const importTimestamp = new Date();
 
         const metadata = {
-          ...processed.normalized.metadata,
+          ...processed.metadata,
           sourceFile: file,
           sourceFormat: extension,
           importPath: path.relative(process.cwd(), filePath),
@@ -116,6 +116,7 @@ class DatabaseSetup {
         const normalizedDocument = {
           ...processed.normalized,
           metadata,
+          searchableFields: processed.searchableFields,
           source: {
             filename: file,
             relativePath: path.relative(process.cwd(), filePath),
