@@ -1,0 +1,46 @@
+{
+  "asyncapi": "2.6.0",
+  "info": {
+    "title": "Media Streaming API",
+    "version": "1.0.0",
+    "description": "Publishes live stream metadata and playback events."
+  },
+  "servers": {
+    "production": {
+      "url": "amqps://media-bus.example.com:5671",
+      "protocol": "amqp"
+    }
+  },
+  "defaultContentType": "application/json",
+  "channels": {
+    "streams/live": {
+      "publish": {
+        "summary": "Notify clients when a live stream starts or ends.",
+        "message": {
+          "name": "StreamLifecycle",
+          "payload": {
+            "type": "object",
+            "properties": {
+              "streamId": {
+                "type": "string"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "started",
+                  "ended"
+                ]
+              },
+              "title": {
+                "type": "string"
+              },
+              "category": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

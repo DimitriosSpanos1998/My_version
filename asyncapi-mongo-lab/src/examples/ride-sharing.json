@@ -1,0 +1,52 @@
+{
+  "asyncapi": "2.6.0",
+  "info": {
+    "title": "Ride Sharing API",
+    "version": "1.0.0",
+    "description": "Handles driver availability and ride matching events."
+  },
+  "servers": {
+    "production": {
+      "url": "ws://rides.example.com:8080/events",
+      "protocol": "ws"
+    }
+  },
+  "defaultContentType": "application/json",
+  "channels": {
+    "drivers/availability": {
+      "publish": {
+        "summary": "Broadcast driver status changes.",
+        "message": {
+          "name": "DriverAvailability",
+          "payload": {
+            "type": "object",
+            "properties": {
+              "driverId": {
+                "type": "string"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "available",
+                  "busy",
+                  "offline"
+                ]
+              },
+              "location": {
+                "type": "object",
+                "properties": {
+                  "lat": {
+                    "type": "number"
+                  },
+                  "lng": {
+                    "type": "number"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
