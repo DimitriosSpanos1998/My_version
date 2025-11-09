@@ -41,7 +41,9 @@ You'll learn how to:
    # Create .env file with your MongoDB connection
    echo "MONGODB_URI=mongodb://localhost:27017/asyncapi-lab" > .env
    echo "DB_NAME=asyncapi-lab" >> .env
-   echo "COLLECTION_NAME=asyncapi_specs" >> .env
+   echo "NORMALIZED_COLLECTION_NAME=asyncapi_normalized" >> .env
+   echo "METADATA_COLLECTION_NAME=asyncapi_metadata" >> .env
+   echo "ORIGINAL_COLLECTION_NAME=asyncapi_originals" >> .env
    ```
 
 4. **Setup database**
@@ -105,7 +107,11 @@ Create a `.env` file in the project root:
 # MongoDB Connection
 MONGODB_URI=mongodb://localhost:27017/asyncapi-lab
 DB_NAME=asyncapi-lab
-COLLECTION_NAME=asyncapi_specs
+NORMALIZED_COLLECTION_NAME=asyncapi_normalized
+METADATA_COLLECTION_NAME=asyncapi_metadata
+ORIGINAL_COLLECTION_NAME=asyncapi_originals
+# Optional legacy fallback
+COLLECTION_NAME=asyncapi_normalized
 
 # Optional: MongoDB Atlas connection
 # MONGODB_URI=mongodb+srv://username:password@cluster.mongodb.net/asyncapi-lab?retryWrites=true&w=majority
@@ -113,6 +119,16 @@ COLLECTION_NAME=asyncapi_specs
 # Logging
 LOG_LEVEL=info
 ```
+
+### Collection Layout
+
+The lab uses three MongoDB collections to separate different representations of each AsyncAPI document:
+
+- **Normalized** (`NORMALIZED_COLLECTION_NAME`): Stores the enriched, query-ready document (including metadata and searchable fields).
+- **Metadata** (`METADATA_COLLECTION_NAME`): Stores a dedicated metadata document for fast lookups and cross-collection references.
+- **Original** (`ORIGINAL_COLLECTION_NAME`): Stores the raw AsyncAPI source content for auditing or re-processing purposes.
+
+Each insert operation automatically writes to all three collections and keeps the metadata document synchronized during updates and deletions.
 
 ### MongoDB Setup Options
 
@@ -163,8 +179,11 @@ The `MongoService` class provides:
 const mongoService = new MongoService();
 await mongoService.connect();
 
-// Insert document
-const result = await mongoService.insertAsyncAPIDocument(normalizedData);
+// Insert document across original, normalized, and metadata collections
+const result = await mongoService.insertAsyncAPIDocument({
+  original: JSON.stringify(asyncAPISpec, null, 2),
+  normalized: normalizedData
+});
 
 // Find documents
 const docs = await mongoService.findDocumentsByProtocol('mqtt');
@@ -177,7 +196,10 @@ const results = await mongoService.searchAsyncAPIDocuments('user');
 
 **Create (Insert)**
 ```javascript
-const insertResult = await mongoService.insertAsyncAPIDocument(asyncAPIData);
+const insertResult = await mongoService.insertAsyncAPIDocument({
+  original: asyncAPIContentAsString,
+  normalized: asyncAPIData
+});
 ```
 
 **Read (Find)**

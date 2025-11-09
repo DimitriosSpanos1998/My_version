@@ -1,10 +1,7 @@
+const { ObjectId } = require('mongodb');
 const databaseConfig = require('../config/database');
 
 class MongoService {
-  constructor() {
-    this.collectionName = process.env.COLLECTION_NAME || 'asyncapi_specs';
-  }
-
   /**
    * Connect to MongoDB database
    * @returns {Promise<Object>} Database instance
@@ -14,42 +11,167 @@ class MongoService {
   }
 
   /**
-   * Get collection instance
+   * Get MongoDB collection by logical type
+   * @param {string} [collectionType='normalized'] Logical collection type
    * @returns {Object} Collection instance
    */
-  getCollection() {
-    return databaseConfig.getCollection(this.collectionName);
+  getCollection(collectionType = 'normalized') {
+    return databaseConfig.getCollection(collectionType);
+  }
+
+  getNormalizedCollection() {
+    return this.getCollection('normalized');
+  }
+
+  getMetadataCollection() {
+    return this.getCollection('metadata');
+  }
+
+  getOriginalCollection() {
+    return this.getCollection('original');
   }
 
   /**
-   * Insert AsyncAPI document into MongoDB
-   * @param {Object} asyncAPIData - Normalized AsyncAPI data
-   * @returns {Promise<Object>} Insert result with document ID
+   * Prepare normalized, metadata, and original content for insertion
+   * @param {Object} asyncAPIData - AsyncAPI data payload
+   * @returns {Object} Prepared document parts
+   */
+  prepareDocumentParts(asyncAPIData) {
+    if (!asyncAPIData) {
+      throw new Error('AsyncAPI data is required');
+    }
+
+    const normalizedData = asyncAPIData.normalized
+      ? { ...asyncAPIData.normalized }
+      : { ...asyncAPIData };
+
+    if (normalizedData._id) {
+      delete normalizedData._id;
+    }
+
+    const metadataData = asyncAPIData.metadata
+      ? { ...asyncAPIData.metadata }
+      : normalizedData.metadata
+        ? { ...normalizedData.metadata }
+        : {};
+
+    if (normalizedData.metadata) {
+      delete normalizedData.metadata;
+    }
+
+    const originalContent =
+      asyncAPIData.original ??
+      asyncAPIData.originalContent ??
+      null;
+
+    const searchableFields = normalizedData.searchableFields
+      ? { ...normalizedData.searchableFields }
+      : undefined;
+
+    if (searchableFields) {
+      normalizedData.searchableFields = searchableFields;
+    }
+
+    return {
+      normalized: normalizedData,
+      metadata: metadataData,
+      original: originalContent
+    };
+  }
+
+  /**
+   * Ensure metadata document has required timestamps
+   * @param {Object} metadata - Metadata object
+   * @returns {Object} Sanitized metadata
+   */
+  sanitizeMetadata(metadata = {}) {
+    const sanitized = { ...metadata };
+    const now = new Date();
+
+    const createdAt = metadata.createdAt ? new Date(metadata.createdAt) : new Date(now);
+    const updatedAt = metadata.updatedAt ? new Date(metadata.updatedAt) : new Date(createdAt);
+    const processedAt = metadata.processedAt ? new Date(metadata.processedAt) : new Date(updatedAt);
+
+    sanitized.createdAt = createdAt;
+    sanitized.updatedAt = updatedAt;
+    sanitized.processedAt = processedAt;
+
+    return sanitized;
+  }
+
+  /**
+   * Insert AsyncAPI document across collections
+   * @param {Object} asyncAPIData - AsyncAPI processing result or normalized document
+   * @returns {Promise<Object>} Insert result with identifiers
    */
   async insertAsyncAPIDocument(asyncAPIData) {
+    const { normalized, metadata, original } = this.prepareDocumentParts(asyncAPIData);
+    const sanitizedMetadata = this.sanitizeMetadata(metadata);
+
+    const metadataCollection = this.getMetadataCollection();
+    const normalizedCollection = this.getNormalizedCollection();
+    const originalCollection = this.getOriginalCollection();
+
+    let metadataResult;
+    let normalizedResult;
+    let originalResult;
+
     try {
-      const collection = this.getCollection();
-      
-      // Add timestamp
-      const document = {
-        ...asyncAPIData,
-        metadata: {
-          ...asyncAPIData.metadata,
-          createdAt: new Date(),
-          updatedAt: new Date()
-        }
+      metadataResult = await metadataCollection.insertOne({ ...sanitizedMetadata });
+      const metadataId = metadataResult.insertedId;
+
+      const normalizedDocument = {
+        ...normalized,
+        metadata: { ...sanitizedMetadata },
+        metadataId
       };
 
-      const result = await collection.insertOne(document);
-      console.log(`💾 Document inserted with ID: ${result.insertedId}`);
-      
+      normalizedResult = await normalizedCollection.insertOne(normalizedDocument);
+      await metadataCollection.updateOne(
+        { _id: metadataId },
+        { $set: { normalizedId: normalizedResult.insertedId } }
+      );
+
+      if (original) {
+        originalResult = await originalCollection.insertOne({
+          metadataId,
+          normalizedId: normalizedResult.insertedId,
+          content: original,
+          createdAt: sanitizedMetadata.createdAt,
+          updatedAt: sanitizedMetadata.updatedAt
+        });
+
+        await metadataCollection.updateOne(
+          { _id: metadataId },
+          { $set: { originalId: originalResult.insertedId } }
+        );
+      }
+
+      console.log(`💾 Document inserted with ID: ${normalizedResult.insertedId}`);
+
       return {
         success: true,
-        insertedId: result.insertedId,
-        document: document
+        insertedId: normalizedResult.insertedId,
+        normalizedId: normalizedResult.insertedId,
+        metadataId,
+        originalId: originalResult ? originalResult.insertedId : null,
+        document: normalizedDocument
       };
     } catch (error) {
       console.error('❌ Error inserting document:', error.message);
+
+      if (originalResult?.insertedId) {
+        await originalCollection.deleteOne({ _id: originalResult.insertedId }).catch(() => {});
+      }
+
+      if (normalizedResult?.insertedId) {
+        await normalizedCollection.deleteOne({ _id: normalizedResult.insertedId }).catch(() => {});
+      }
+
+      if (metadataResult?.insertedId) {
+        await metadataCollection.deleteOne({ _id: metadataResult.insertedId }).catch(() => {});
+      }
+
       throw error;
     }
   }
@@ -62,7 +184,7 @@ class MongoService {
    */
   async findAsyncAPIDocuments(query = {}, options = {}) {
     try {
-      const collection = this.getCollection();
+      const collection = this.getNormalizedCollection();
       
       const {
         limit = 10,
@@ -93,9 +215,7 @@ class MongoService {
    */
   async findAsyncAPIDocumentById(id) {
     try {
-      const collection = this.getCollection();
-      const { ObjectId } = require('mongodb');
-      
+      const collection = this.getNormalizedCollection();
       const document = await collection.findOne({ _id: new ObjectId(id) });
       
       if (document) {
@@ -119,35 +239,100 @@ class MongoService {
    */
   async updateAsyncAPIDocument(id, updates) {
     try {
-      const collection = this.getCollection();
-      const { ObjectId } = require('mongodb');
-      
-      // Add update timestamp
-      const updateData = {
-        ...updates,
-        'metadata.updatedAt': new Date()
-      };
+      const collection = this.getNormalizedCollection();
+      const objectId = typeof id === 'string' ? new ObjectId(id) : id;
 
-      const result = await collection.updateOne(
-        { _id: new ObjectId(id) },
-        { $set: updateData }
+      const existingDoc = await collection.findOne(
+        { _id: objectId },
+        { projection: { metadataId: 1 } }
       );
 
-      if (result.matchedCount === 0) {
+      if (!existingDoc) {
         throw new Error(`Document with ID ${id} not found`);
       }
 
+      const updateTimestamp = new Date();
+      const updateData = {
+        ...updates,
+        'metadata.updatedAt': updateTimestamp
+      };
+
+      const result = await collection.updateOne(
+        { _id: objectId },
+        { $set: updateData }
+      );
+
+      let metadataUpdateResult = { matchedCount: 0, modifiedCount: 0 };
+      if (existingDoc.metadataId) {
+        const metadataUpdates = this.extractMetadataUpdates(updates);
+        metadataUpdates.updatedAt = this.ensureMetadataValue('updatedAt', updateTimestamp);
+
+        metadataUpdateResult = await this.getMetadataCollection().updateOne(
+          { _id: existingDoc.metadataId },
+          { $set: metadataUpdates }
+        );
+
+        await this.getOriginalCollection().updateMany(
+          { metadataId: existingDoc.metadataId },
+          { $set: { updatedAt: this.ensureMetadataValue('updatedAt', updateTimestamp) } }
+        );
+      }
+
       console.log(`✏️ Document updated: ${result.modifiedCount} field(s) modified`);
-      
+
       return {
         success: true,
         modifiedCount: result.modifiedCount,
-        matchedCount: result.matchedCount
+        matchedCount: result.matchedCount,
+        metadataMatchedCount: metadataUpdateResult.matchedCount,
+        metadataModifiedCount: metadataUpdateResult.modifiedCount
       };
     } catch (error) {
       console.error('❌ Error updating document:', error.message);
       throw error;
     }
+  }
+
+  /**
+   * Extract metadata-specific updates from payload
+   * @param {Object} updates - Update payload
+   * @returns {Object} Metadata updates
+   */
+  extractMetadataUpdates(updates = {}) {
+    const metadataUpdates = {};
+
+    if (!updates || typeof updates !== 'object') {
+      return metadataUpdates;
+    }
+
+    if (updates.metadata && typeof updates.metadata === 'object') {
+      Object.entries(updates.metadata).forEach(([key, value]) => {
+        metadataUpdates[key] = this.ensureMetadataValue(key, value);
+      });
+    }
+
+    Object.entries(updates).forEach(([key, value]) => {
+      if (key.startsWith('metadata.')) {
+        const metadataKey = key.replace('metadata.', '');
+        metadataUpdates[metadataKey] = this.ensureMetadataValue(metadataKey, value);
+      }
+    });
+
+    return metadataUpdates;
+  }
+
+  /**
+   * Normalize metadata field values (e.g. ensure Date instances)
+   * @param {string} key - Metadata field key
+   * @param {*} value - Field value
+   * @returns {*} Normalized value
+   */
+  ensureMetadataValue(key, value) {
+    if (['createdAt', 'updatedAt', 'processedAt'].includes(key) && value) {
+      return new Date(value);
+    }
+
+    return value;
   }
 
   /**
@@ -157,28 +342,48 @@ class MongoService {
    */
   async deleteAsyncAPIDocument(id) {
     try {
-      const collection = this.getCollection();
-      const { ObjectId } = require('mongodb');
-      
-      // Handle both string and ObjectId
+      const collection = this.getNormalizedCollection();
       const objectId = typeof id === 'string' ? new ObjectId(id) : id;
-      
-      const result = await collection.deleteOne({ _id: objectId });
 
-      if (result.deletedCount === 0) {
+      const document = await collection.findOne(
+        { _id: objectId },
+        { projection: { metadataId: 1 } }
+      );
+
+      if (!document) {
         console.warn(`⚠️ Document with ID ${id} not found (or already deleted)`);
-        // Return success even if not found to avoid throwing in test cleanup
         return {
           success: true,
-          deletedCount: 0
+          deletedCount: 0,
+          metadataDeletedCount: 0,
+          originalDeletedCount: 0
         };
       }
 
+      const result = await collection.deleteOne({ _id: objectId });
+
+      let metadataDeletedCount = 0;
+      let originalDeletedCount = 0;
+
+      if (document.metadataId) {
+        const metadataResult = await this.getMetadataCollection().deleteOne({
+          _id: document.metadataId
+        });
+        metadataDeletedCount = metadataResult.deletedCount;
+
+        const originalResult = await this.getOriginalCollection().deleteMany({
+          metadataId: document.metadataId
+        });
+        originalDeletedCount = originalResult.deletedCount;
+      }
+
       console.log(`🗑️ Document deleted: ${result.deletedCount} document(s) removed`);
-      
+
       return {
         success: true,
-        deletedCount: result.deletedCount
+        deletedCount: result.deletedCount,
+        metadataDeletedCount,
+        originalDeletedCount
       };
     } catch (error) {
       console.error('❌ Error deleting document:', error.message);
@@ -203,7 +408,7 @@ class MongoService {
    */
   async searchAsyncAPIDocuments(searchText, options = {}) {
     try {
-      const collection = this.getCollection();
+      const collection = this.getNormalizedCollection();
       
       const searchQuery = {
         $or: [
@@ -248,7 +453,7 @@ class MongoService {
    */
   async getDocumentStatistics() {
     try {
-      const collection = this.getCollection();
+      const collection = this.getNormalizedCollection();
       
       const totalCount = await collection.countDocuments();
       const protocolStats = await collection.aggregate([

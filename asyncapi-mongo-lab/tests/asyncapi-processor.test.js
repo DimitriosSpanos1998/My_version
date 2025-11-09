@@ -1,3 +1,6 @@
+process.env.USE_IN_MEMORY_MONGO = 'true';
+process.env.DB_NAME = 'asyncapi-processor-test';
+
 const AsyncAPIProcessor = require('../src/processors/asyncapi-processor');
 const MongoService = require('../src/services/mongo-service');
 
@@ -12,6 +15,16 @@ describe('AsyncAPI MongoDB Lab Tests', () => {
 
   afterAll(async () => {
     await mongoService.close();
+  });
+
+  afterEach(async () => {
+    if (mongoService.isDatabaseConnected()) {
+      await Promise.all([
+        mongoService.getCollection('normalized').deleteMany({}),
+        mongoService.getCollection('metadata').deleteMany({}),
+        mongoService.getCollection('original').deleteMany({})
+      ]);
+    }
   });
 
   describe('AsyncAPIProcessor', () => {
@@ -82,9 +95,13 @@ describe('AsyncAPI MongoDB Lab Tests', () => {
         }
       };
 
-      const insertResult = await mongoService.insertAsyncAPIDocument(testDoc);
+      const insertResult = await mongoService.insertAsyncAPIDocument({
+        original: JSON.stringify({ title: testDoc.metadata.title }),
+        normalized: testDoc
+      });
       expect(insertResult.success).toBe(true);
       expect(insertResult.insertedId).toBeDefined();
+      expect(insertResult.metadataId).toBeDefined();
 
       const foundDoc = await mongoService.findAsyncAPIDocumentById(insertResult.insertedId.toString());
       expect(foundDoc).toBeDefined();

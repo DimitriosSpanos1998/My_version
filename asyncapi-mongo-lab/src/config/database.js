@@ -1,4 +1,5 @@
 const { MongoClient } = require('mongodb');
+const InMemoryDatabase = require('./in-memory-database');
 require('dotenv').config();
 
 class DatabaseConfig {
@@ -6,6 +7,37 @@ class DatabaseConfig {
     this.client = null;
     this.db = null;
     this.isConnected = false;
+    this.isInMemory = false;
+  }
+
+  /**
+   * Resolve configured collection names
+   * @returns {Object} Collection names keyed by logical type
+   */
+  getCollectionNames() {
+    return {
+      original: process.env.ORIGINAL_COLLECTION_NAME || 'asyncapi_originals',
+      normalized:
+        process.env.NORMALIZED_COLLECTION_NAME ||
+        process.env.COLLECTION_NAME ||
+        'asyncapi_normalized',
+      metadata: process.env.METADATA_COLLECTION_NAME || 'asyncapi_metadata'
+    };
+  }
+
+  /**
+   * Resolve collection name from logical type or explicit name
+   * @param {string} [collectionTypeOrName='normalized'] Logical type or explicit collection name
+   * @returns {string} MongoDB collection name
+   */
+  getCollectionName(collectionTypeOrName = 'normalized') {
+    const names = this.getCollectionNames();
+
+    if (!collectionTypeOrName) {
+      return names.normalized;
+    }
+
+    return names[collectionTypeOrName] || collectionTypeOrName;
   }
 
   /**
@@ -15,6 +47,14 @@ class DatabaseConfig {
   async connect() {
     try {
       if (this.isConnected && this.db) {
+        return this.db;
+      }
+
+      if (process.env.USE_IN_MEMORY_MONGO === 'true') {
+        console.log('🧪 Using in-memory MongoDB instance');
+        this.db = new InMemoryDatabase();
+        this.isConnected = true;
+        this.isInMemory = true;
         return this.db;
       }
 
@@ -55,8 +95,9 @@ class DatabaseConfig {
    * @param {string} collectionName - Name of the collection
    * @returns {Object} Collection instance
    */
-  getCollection(collectionName = process.env.COLLECTION_NAME || 'asyncapi_specs') {
+  getCollection(collectionTypeOrName = 'normalized') {
     const db = this.getDatabase();
+    const collectionName = this.getCollectionName(collectionTypeOrName);
     return db.collection(collectionName);
   }
 
@@ -64,6 +105,15 @@ class DatabaseConfig {
    * Close database connection
    */
   async close() {
+    if (this.isInMemory && this.db) {
+      this.db.close();
+      this.db = null;
+      this.isConnected = false;
+      this.isInMemory = false;
+      console.log('🧪 In-memory MongoDB connection closed');
+      return;
+    }
+
     if (this.client) {
       await this.client.close();
       this.isConnected = false;
@@ -85,36 +135,83 @@ class DatabaseConfig {
    * Create indexes for better performance
    * @param {string} collectionName - Name of the collection
    */
-  async createIndexes(collectionName = process.env.COLLECTION_NAME || 'asyncapi_specs') {
+  async createIndexes() {
     try {
-      const collection = this.getCollection(collectionName);
-      
-      // Drop existing indexes to avoid conflicts (except _id index)
-      try {
-        await collection.dropIndexes();
-        console.log('🗑️ Dropped existing indexes');
-      } catch (error) {
-        // Ignore error if no indexes exist or other indexes are present
-        console.log('⚠️ Could not drop all indexes (this is usually fine)');
-      }
-      
-      // Create indexes for common query patterns
-      await collection.createIndex({ 'metadata.title': 1 });
-      await collection.createIndex({ 'metadata.version': 1 });
-      await collection.createIndex({ 'metadata.protocol': 1 });
-      await collection.createIndex({ 'metadata.createdAt': 1 });
-      await collection.createIndex({ 'metadata.updatedAt': 1 });
-      // Create a compound text index (MongoDB allows only one text index per collection)
-      await collection.createIndex({ 
-        'searchableFields.title': 'text',
-        'searchableFields.description': 'text'
-      });
-      await collection.createIndex({ 'searchableFields.tags': 1 });
-      
+      await this.createNormalizedIndexes();
+      await this.createMetadataIndexes();
+      await this.createOriginalIndexes();
       console.log('📊 Database indexes created successfully');
     } catch (error) {
       console.error('❌ Error creating indexes:', error.message);
       throw error;
+    }
+  }
+
+  /**
+   * Create indexes for normalized documents collection
+   */
+  async createNormalizedIndexes() {
+    const collection = this.getCollection('normalized');
+
+    await this.dropCollectionIndexes(collection, 'normalized');
+
+    await collection.createIndex({ metadataId: 1 }, { name: 'metadata_id_idx' });
+    await collection.createIndex({ 'metadata.title': 1 }, { name: 'metadata_title_idx' });
+    await collection.createIndex({ 'metadata.version': 1 }, { name: 'metadata_version_idx' });
+    await collection.createIndex({ 'metadata.protocol': 1 }, { name: 'metadata_protocol_idx' });
+    await collection.createIndex({ 'metadata.createdAt': 1 }, { name: 'metadata_created_at_idx' });
+    await collection.createIndex({ 'metadata.updatedAt': 1 }, { name: 'metadata_updated_at_idx' });
+    await collection.createIndex({ 'searchableFields.tags': 1 }, { name: 'searchable_tags_idx' });
+    await collection.createIndex(
+      {
+        'searchableFields.title': 'text',
+        'searchableFields.description': 'text'
+      },
+      { name: 'searchable_text_idx' }
+    );
+  }
+
+  /**
+   * Create indexes for metadata collection
+   */
+  async createMetadataIndexes() {
+    const collection = this.getCollection('metadata');
+
+    await this.dropCollectionIndexes(collection, 'metadata');
+
+    await collection.createIndex({ title: 1 }, { name: 'title_idx' });
+    await collection.createIndex({ version: 1 }, { name: 'version_idx' });
+    await collection.createIndex({ protocol: 1 }, { name: 'protocol_idx' });
+    await collection.createIndex({ createdAt: 1 }, { name: 'created_at_idx' });
+    await collection.createIndex({ updatedAt: 1 }, { name: 'updated_at_idx' });
+    await collection.createIndex({ description: 'text' }, { name: 'description_text_idx' });
+  }
+
+  /**
+   * Create indexes for original documents collection
+   */
+  async createOriginalIndexes() {
+    const collection = this.getCollection('original');
+
+    await this.dropCollectionIndexes(collection, 'original');
+
+    await collection.createIndex({ metadataId: 1 }, { name: 'metadata_id_idx' });
+    await collection.createIndex({ normalizedId: 1 }, { name: 'normalized_id_idx' });
+    await collection.createIndex({ createdAt: 1 }, { name: 'created_at_idx' });
+  }
+
+  /**
+   * Drop existing indexes for a collection (ignoring _id)
+   * @param {Object} collection - MongoDB collection
+   * @param {string} label - Collection label for logging
+   */
+  async dropCollectionIndexes(collection, label) {
+    try {
+      await collection.dropIndexes();
+      console.log(`🗑️ Dropped existing indexes for ${label} collection`);
+    } catch (error) {
+      // Ignore errors when indexes do not exist yet
+      console.log(`ℹ️ No existing indexes to drop for ${label} collection`);
     }
   }
 }
