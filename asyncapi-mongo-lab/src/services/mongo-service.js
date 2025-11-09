@@ -42,8 +42,8 @@ class MongoService {
     }
 
     const normalizedData = asyncAPIData.normalized
-      ? { ...asyncAPIData.normalized }
-      : { ...asyncAPIData };
+      ? JSON.parse(JSON.stringify(asyncAPIData.normalized))
+      : JSON.parse(JSON.stringify(asyncAPIData));
 
     if (normalizedData._id) {
       delete normalizedData._id;
@@ -68,9 +68,11 @@ class MongoService {
       delete originalContent._id;
     }
 
-    const searchableFields = normalizedData.searchableFields
-      ? { ...normalizedData.searchableFields }
-      : undefined;
+    const searchableFields = asyncAPIData.searchableFields
+      ? { ...asyncAPIData.searchableFields }
+      : normalizedData.searchableFields
+        ? { ...normalizedData.searchableFields }
+        : this.buildSearchableFields(metadataData);
 
     if (searchableFields) {
       normalizedData.searchableFields = searchableFields;
@@ -101,6 +103,31 @@ class MongoService {
     sanitized.processedAt = processedAt;
 
     return sanitized;
+  }
+
+  buildSearchableFields(metadata = {}) {
+    if (!metadata || typeof metadata !== 'object') {
+      return undefined;
+    }
+
+    const service = metadata.service || {};
+    const tagsSource = metadata.tags || service.tags || [];
+
+    const toLower = value => (typeof value === 'string' ? value.toLowerCase() : '');
+
+    return {
+      title: toLower(metadata.title || service.title || ''),
+      description: toLower(metadata.description || service.description || ''),
+      version: metadata.version || service.version || '',
+      protocol: toLower(metadata.protocol || ''),
+      tags: Array.from(
+        new Set(
+          (Array.isArray(tagsSource) ? tagsSource : [tagsSource])
+            .filter(Boolean)
+            .map(tag => tag.toString().toLowerCase())
+        )
+      )
+    };
   }
 
   /**

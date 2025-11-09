@@ -33,8 +33,8 @@ describe('AsyncAPI MongoDB Lab Tests', () => {
       
       expect(result).toBeDefined();
       expect(result.normalized).toBeDefined();
-      expect(result.normalized.metadata.title).toBe('User Service API');
-      expect(result.normalized.metadata.version).toBe('1.0.0');
+      expect(result.metadata.title).toBe('User Service API');
+      expect(result.metadata.version).toBe('1.0.0');
     });
 
     test('should validate AsyncAPI specification', () => {
@@ -74,31 +74,9 @@ describe('AsyncAPI MongoDB Lab Tests', () => {
     });
 
     test('should insert and find document', async () => {
-      const testDoc = {
-        metadata: {
-          title: 'Test API',
-          version: '1.0.0',
-          description: 'Test API for unit testing',
-          protocol: 'test',
-          channelsCount: 1,
-          serversCount: 1,
-          createdAt: new Date(),
-          updatedAt: new Date(),
-          processedAt: new Date()
-        },
-        searchableFields: {
-          title: 'test api',
-          description: 'test api for unit testing',
-          version: '1.0.0',
-          protocol: 'test',
-          tags: ['test']
-        }
-      };
+      const processed = await processor.processAsyncAPIFile('src/examples/sample-asyncapi.yaml');
 
-      const insertResult = await mongoService.insertAsyncAPIDocument({
-        original: JSON.stringify({ title: testDoc.metadata.title }),
-        normalized: testDoc
-      });
+      const insertResult = await mongoService.insertAsyncAPIDocument(processed);
       expect(insertResult.success).toBe(true);
       expect(insertResult.insertedId).toBeDefined();
       expect(insertResult.metadataId).toBeDefined();
@@ -106,7 +84,7 @@ describe('AsyncAPI MongoDB Lab Tests', () => {
       const foundDoc = await mongoService.findAsyncAPIDocumentById(insertResult.insertedId.toString());
       expect(foundDoc).toBeDefined();
       expect(foundDoc).not.toBeNull();
-      expect(foundDoc.metadata.title).toBe('Test API');
+      expect(foundDoc.metadata.title).toBe(processed.metadata.title);
 
       // Clean up
       await mongoService.deleteAsyncAPIDocument(insertResult.insertedId.toString());
