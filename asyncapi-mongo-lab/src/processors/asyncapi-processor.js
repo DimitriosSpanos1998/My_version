@@ -414,4 +414,3 @@ async convertAsyncAPI(originalContent, parsedSpec, targetFormat = 'json') {
 }
 
 module.exports = AsyncAPIProcessor;
-
