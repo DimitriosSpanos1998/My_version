@@ -64,6 +64,10 @@ class MongoService {
       asyncAPIData.originalContent ??
       null;
 
+    if (originalContent && typeof originalContent === 'object' && originalContent._id) {
+      delete originalContent._id;
+    }
+
     const searchableFields = normalizedData.searchableFields
       ? { ...normalizedData.searchableFields }
       : undefined;
@@ -132,14 +136,16 @@ class MongoService {
         { $set: { normalizedId: normalizedResult.insertedId } }
       );
 
-      if (original) {
-        originalResult = await originalCollection.insertOne({
-          metadataId,
-          normalizedId: normalizedResult.insertedId,
-          content: original,
-          createdAt: sanitizedMetadata.createdAt,
-          updatedAt: sanitizedMetadata.updatedAt
-        });
+      const originalDocument = this.buildOriginalDocument(
+        original,
+        normalizedDocument,
+        metadataId,
+        normalizedResult.insertedId,
+        sanitizedMetadata
+      );
+
+      if (originalDocument) {
+        originalResult = await originalCollection.insertOne(originalDocument);
 
         await metadataCollection.updateOne(
           { _id: metadataId },
@@ -174,6 +180,37 @@ class MongoService {
 
       throw error;
     }
+  }
+
+  buildOriginalDocument(original, normalizedDocument, metadataId, normalizedId, sanitizedMetadata) {
+    let baseDocument = null;
+
+    if (original && typeof original === 'object' && !Array.isArray(original)) {
+      baseDocument = { ...original };
+    } else if (normalizedDocument) {
+      baseDocument = { ...normalizedDocument };
+    }
+
+    if (!baseDocument) {
+      return null;
+    }
+
+    if (baseDocument._id) {
+      delete baseDocument._id;
+    }
+
+    const metadata = baseDocument.metadata
+      ? this.sanitizeMetadata(baseDocument.metadata)
+      : { ...sanitizedMetadata };
+
+    return {
+      ...baseDocument,
+      metadata,
+      metadataId,
+      normalizedId,
+      createdAt: metadata.createdAt,
+      updatedAt: metadata.updatedAt
+    };
   }
 
   /**

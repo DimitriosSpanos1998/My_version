@@ -79,6 +79,10 @@ describe('MongoService Integration Tests', () => {
       const storedOriginal = await originalCollection.findOne({ metadataId: insertResult.metadataId });
       expect(storedOriginal).toBeDefined();
       expect(storedOriginal.normalizedId.toString()).toBe(docId);
+      expect(storedOriginal.metadata.title).toBe('CRUD Test API');
+      expect(storedOriginal.metadata.version).toBe('1.0.0');
+      expect(storedOriginal.searchableFields.title).toBe('crud test api');
+      expect(storedOriginal.content).toBeUndefined();
 
       // Read
       const foundDoc = await mongoService.findAsyncAPIDocumentById(docId);
