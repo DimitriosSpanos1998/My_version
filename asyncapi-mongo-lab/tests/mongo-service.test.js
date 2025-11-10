@@ -81,8 +81,8 @@ describe('MongoService Integration Tests', () => {
       expect(storedOriginal.normalizedId.toString()).toBe(docId);
       expect(storedOriginal.metadata.title).toBe('CRUD Test API');
       expect(storedOriginal.metadata.version).toBe('1.0.0');
-      expect(storedOriginal.searchableFields.title).toBe('crud test api');
-      expect(storedOriginal.content).toBeUndefined();
+      expect(storedOriginal.document).toEqual({ title: 'CRUD Test API' });
+      expect(storedOriginal.rawContent).toContain('CRUD Test API');
 
       // Read
       const foundDoc = await mongoService.findAsyncAPIDocumentById(docId);
@@ -122,6 +122,90 @@ describe('MongoService Integration Tests', () => {
 
       const remainingOriginal = await originalCollection.countDocuments({ metadataId: insertResult.metadataId });
       expect(remainingOriginal).toBe(0);
+    });
+
+    test('should preserve original AsyncAPI specification in original collection', async () => {
+      const now = new Date();
+      const asyncAPISpec = {
+        asyncapi: '2.6.0',
+        info: {
+          title: 'Banking Transactions API',
+          version: '1.0.0',
+          description: 'Streams transaction events for a retail banking platform.'
+        },
+        servers: {
+          production: {
+            url: 'mqtts://broker.bank.example.com:8883',
+            protocol: 'mqtt',
+            description: 'Secure production broker.'
+          }
+        },
+        defaultContentType: 'application/json',
+        channels: {
+          'transaction/created': {
+            description: 'Notifies when new transactions are recorded.',
+            subscribe: {
+              summary: 'Receive newly created transaction events.',
+              message: {
+                name: 'TransactionCreated',
+                payload: {
+                  type: 'object',
+                  properties: {
+                    transactionId: { type: 'string' },
+                    accountId: { type: 'string' },
+                    amount: { type: 'number' },
+                    currency: { type: 'string' },
+                    timestamp: {
+                      type: 'string',
+                      format: 'date-time'
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      };
+
+      const metadata = {
+        title: asyncAPISpec.info.title,
+        version: asyncAPISpec.info.version,
+        description: asyncAPISpec.info.description,
+        protocol: 'mqtt',
+        channelsCount: Object.keys(asyncAPISpec.channels).length,
+        serversCount: Object.keys(asyncAPISpec.servers).length,
+        tags: [],
+        createdAt: now,
+        updatedAt: now,
+        processedAt: now
+      };
+
+      const searchableFields = {
+        title: metadata.title.toLowerCase(),
+        description: metadata.description.toLowerCase(),
+        version: metadata.version,
+        protocol: metadata.protocol,
+        tags: []
+      };
+
+      const insertResult = await mongoService.insertAsyncAPIDocument({
+        original: JSON.stringify(asyncAPISpec, null, 2),
+        normalized: {
+          metadata,
+          searchableFields
+        },
+        metadata,
+        searchableFields
+      });
+
+      expect(insertResult.success).toBe(true);
+
+      const originalCollection = mongoService.getCollection('original');
+      const storedOriginal = await originalCollection.findOne({ metadataId: insertResult.metadataId });
+
+      expect(storedOriginal).toBeDefined();
+      expect(storedOriginal.document).toEqual(asyncAPISpec);
+      expect(storedOriginal.rawContent).toEqual(JSON.stringify(asyncAPISpec, null, 2));
     });
   });
 

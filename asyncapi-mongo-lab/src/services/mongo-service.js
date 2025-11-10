@@ -1,4 +1,5 @@
 const { ObjectId } = require('mongodb');
+const yaml = require('yaml');
 const databaseConfig = require('../config/database');
 
 class MongoService {
@@ -59,14 +60,12 @@ class MongoService {
       delete normalizedData.metadata;
     }
 
-    const originalContent =
+    const originalContent = this.prepareOriginalContent(
       asyncAPIData.original ??
       asyncAPIData.originalContent ??
-      null;
-
-    if (originalContent && typeof originalContent === 'object' && originalContent._id) {
-      delete originalContent._id;
-    }
+      asyncAPIData.raw ??
+      null
+    );
 
     const searchableFields = asyncAPIData.searchableFields
       ? { ...asyncAPIData.searchableFields }
@@ -209,35 +208,98 @@ class MongoService {
     }
   }
 
-  buildOriginalDocument(original, normalizedDocument, metadataId, normalizedId, sanitizedMetadata) {
-    let baseDocument = null;
-
-    if (original && typeof original === 'object' && !Array.isArray(original)) {
-      baseDocument = { ...original };
-    } else if (normalizedDocument) {
-      baseDocument = { ...normalizedDocument };
-    }
-
-    if (!baseDocument) {
+  prepareOriginalContent(originalContent) {
+    if (!originalContent) {
       return null;
     }
 
-    if (baseDocument._id) {
-      delete baseDocument._id;
+    if (originalContent && typeof originalContent === 'object' && originalContent._id) {
+      const cloned = JSON.parse(JSON.stringify(originalContent));
+      delete cloned._id;
+      return cloned;
     }
 
-    const metadata = baseDocument.metadata
-      ? this.sanitizeMetadata(baseDocument.metadata)
-      : { ...sanitizedMetadata };
+    return originalContent;
+  }
 
-    return {
-      ...baseDocument,
+  parseOriginalContentToObject(originalContent) {
+    if (typeof originalContent !== 'string') {
+      return null;
+    }
+
+    const trimmed = originalContent.trim();
+    if (!trimmed) {
+      return null;
+    }
+
+    try {
+      if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+        return JSON.parse(trimmed);
+      }
+    } catch (error) {
+      // Fallback to YAML parsing below
+    }
+
+    try {
+      return yaml.parse(trimmed);
+    } catch (error) {
+      return null;
+    }
+  }
+
+  buildOriginalDocument(original, normalizedDocument, metadataId, normalizedId, sanitizedMetadata) {
+    let documentContent = null;
+    let rawContent = null;
+
+    if (original && typeof original === 'object' && !Array.isArray(original)) {
+      const cloned = JSON.parse(JSON.stringify(original));
+      if (cloned.raw || cloned.rawContent) {
+        rawContent = cloned.raw ?? cloned.rawContent;
+        delete cloned.raw;
+        delete cloned.rawContent;
+      }
+      documentContent = cloned;
+    } else if (typeof original === 'string') {
+      rawContent = original;
+      documentContent = this.parseOriginalContentToObject(original);
+    }
+
+    if (!documentContent && normalizedDocument) {
+      documentContent = JSON.parse(JSON.stringify(normalizedDocument));
+    }
+
+    if (!documentContent) {
+      return null;
+    }
+
+    if (documentContent._id) {
+      delete documentContent._id;
+    }
+
+    if (documentContent.metadataId) {
+      delete documentContent.metadataId;
+    }
+
+    if (documentContent.metadata) {
+      delete documentContent.metadata;
+    }
+
+    const metadata = this.sanitizeMetadata({ ...sanitizedMetadata });
+
+    const baseOriginalDocument = {
       metadata,
       metadataId,
       normalizedId,
       createdAt: metadata.createdAt,
-      updatedAt: metadata.updatedAt
+      updatedAt: metadata.updatedAt,
+      document: documentContent
     };
+
+    if (rawContent) {
+      baseOriginalDocument.rawContent = rawContent;
+    }
+
+    return baseOriginalDocument;
   }
 
   /**
