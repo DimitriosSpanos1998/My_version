@@ -1,5 +1,4 @@
 const { MongoClient } = require('mongodb');
-const InMemoryDatabase = require('./in-memory-database');
 require('dotenv').config();
 
 class DatabaseConfig {
@@ -7,7 +6,6 @@ class DatabaseConfig {
     this.client = null;
     this.db = null;
     this.isConnected = false;
-    this.isInMemory = false;
   }
 
   /**
@@ -49,22 +47,11 @@ class DatabaseConfig {
         return this.db;
       }
 
-      if (process.env.USE_IN_MEMORY_MONGO === 'true') {
-        console.log('🧪 Using in-memory MongoDB instance');
-        this.db = new InMemoryDatabase();
-        this.isConnected = true;
-        this.isInMemory = true;
-        return this.db;
-      }
-
       const uri = process.env.MONGODB_URI || 'mongodb://localhost:27017/asyncapi-lab';
       const dbName = process.env.DB_NAME || 'asyncapi-lab';
 
       console.log('🔌 Connecting to MongoDB...');
-      this.client = new MongoClient(uri, {
-        useNewUrlParser: true,
-        useUnifiedTopology: true,
-      });
+      this.client = new MongoClient(uri);
 
       await this.client.connect();
       this.db = this.client.db(dbName);
@@ -104,15 +91,6 @@ class DatabaseConfig {
    * Close database connection
    */
   async close() {
-    if (this.isInMemory && this.db) {
-      this.db.close();
-      this.db = null;
-      this.isConnected = false;
-      this.isInMemory = false;
-      console.log('🧪 In-memory MongoDB connection closed');
-      return;
-    }
-
     if (this.client) {
       await this.client.close();
       this.isConnected = false;

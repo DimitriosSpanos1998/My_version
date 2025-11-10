@@ -1,10 +1,9 @@
-process.env.USE_IN_MEMORY_MONGO = 'true';
-process.env.DB_NAME = 'mongo-service-test';
-
 const MongoService = require('../src/services/mongo-service');
+const { createMockDatabaseConfig } = require('./helpers/mock-database-config');
 
 describe('MongoService Integration Tests', () => {
   let mongoService;
+  let mockConfig;
 
   const clearCollections = async () => {
     if (!mongoService || !mongoService.isDatabaseConnected()) {
@@ -21,7 +20,8 @@ describe('MongoService Integration Tests', () => {
   };
 
   beforeAll(async () => {
-    mongoService = new MongoService();
+    mockConfig = createMockDatabaseConfig();
+    mongoService = new MongoService(mockConfig);
     await mongoService.connect();
   });
 
@@ -57,7 +57,6 @@ describe('MongoService Integration Tests', () => {
         }
       };
 
-      // Create
       const insertResult = await mongoService.insertAsyncAPIDocument({
         original: JSON.stringify({ title: testDoc.summary.title }),
         normalized: testDoc
@@ -67,19 +66,16 @@ describe('MongoService Integration Tests', () => {
       expect(insertResult.originalId).toBeDefined();
 
       const originalCollection = mongoService.getCollection('original');
-
       const storedOriginal = await originalCollection.findOne({ normalizedId: insertResult.insertedId });
       expect(storedOriginal).toBeDefined();
       expect(storedOriginal.normalizedId.toString()).toBe(docId);
-      expect(storedOriginal.document.title).toBe('CRUD Test API');
-      expect(storedOriginal.rawContent).toContain('CRUD Test API');
+      expect(storedOriginal.raw).toContain('CRUD Test API');
+      expect(storedOriginal.metadata).toBeUndefined();
 
-      // Read
       const foundDoc = await mongoService.findAsyncAPIDocumentById(docId);
       expect(foundDoc).toBeDefined();
       expect(foundDoc.summary.title).toBe('CRUD Test API');
 
-      // Update
       const updateResult = await mongoService.updateAsyncAPIDocument(docId, {
         'summary.description': 'Updated description',
         'summary.version': '1.1.0'
@@ -87,17 +83,14 @@ describe('MongoService Integration Tests', () => {
       expect(updateResult.success).toBe(true);
       expect(updateResult.modifiedCount).toBe(1);
 
-      // Verify update
       const updatedDoc = await mongoService.findAsyncAPIDocumentById(docId);
       expect(updatedDoc.summary.description).toBe('Updated description');
       expect(updatedDoc.summary.version).toBe('1.1.0');
 
-      // Delete
       const deleteResult = await mongoService.deleteAsyncAPIDocument(docId);
       expect(deleteResult.success).toBe(true);
       expect(deleteResult.deletedCount).toBe(1);
 
-      // Verify deletion
       const deletedDoc = await mongoService.findAsyncAPIDocumentById(docId);
       expect(deletedDoc).toBeNull();
 
@@ -185,14 +178,12 @@ describe('MongoService Integration Tests', () => {
       const storedOriginal = await originalCollection.findOne({ normalizedId: insertResult.insertedId });
 
       expect(storedOriginal).toBeDefined();
-      expect(storedOriginal.document.asyncapi || storedOriginal.document.version).toBeDefined();
-      expect(storedOriginal.rawContent).toEqual(JSON.stringify(asyncAPISpec, null, 2));
+      expect(storedOriginal.raw).toEqual(JSON.stringify(asyncAPISpec, null, 2));
     });
   });
 
   describe('Query Operations', () => {
     beforeEach(async () => {
-      // Insert test data
       const testDocs = [
         {
           summary: {
@@ -220,6 +211,10 @@ describe('MongoService Integration Tests', () => {
             protocol: 'ws',
             channelsCount: 3,
             serversCount: 2,
+            createdAt: new Date(),
+            updatedAt: new Date(),
+            processedAt: new Date()
+          },
             createdAt: new Date(),
             updatedAt: new Date(),
             processedAt: new Date()
@@ -273,6 +268,38 @@ describe('MongoService Integration Tests', () => {
     });
 
     test('should find documents with complex queries', async () => {
+
+    test('should find documents by protocol', async () => {
+      const mqttDocs = await mongoService.findDocumentsByProtocol('mqtt');
+      expect(mqttDocs).toHaveLength(1);
+      expect(mqttDocs[0].summary.protocol).toBe('mqtt');
+
+      const wsDocs = await mongoService.findDocumentsByProtocol('ws');
+      expect(wsDocs).toHaveLength(1);
+      expect(wsDocs[0].summary.protocol).toBe('ws');
+    });
+
+    test('should find documents by version', async () => {
+      const v1Docs = await mongoService.findDocumentsByVersion('1.0.0');
+      expect(v1Docs).toHaveLength(1);
+      expect(v1Docs[0].summary.version).toBe('1.0.0');
+
+      const v2Docs = await mongoService.findDocumentsByVersion('2.0.0');
+      expect(v2Docs).toHaveLength(1);
+      expect(v2Docs[0].summary.version).toBe('2.0.0');
+    });
+
+    test('should search documents by text', async () => {
+      const mqttResults = await mongoService.searchAsyncAPIDocuments('mqtt');
+      expect(mqttResults).toHaveLength(1);
+      expect(mqttResults[0].summary.title).toBe('MQTT API');
+
+      const wsResults = await mongoService.searchAsyncAPIDocuments('websocket');
+      expect(wsResults).toHaveLength(1);
+      expect(wsResults[0].summary.title).toBe('WebSocket API');
+    });
+
+    test('should find documents with complex queries', async () => {
       const multiChannelDocs = await mongoService.findAsyncAPIDocuments({
         'summary.channelsCount': { $gt: 3 }
       });
@@ -289,6 +316,11 @@ describe('MongoService Integration Tests', () => {
 
   describe('Statistics and Aggregations', () => {
     beforeEach(async () => {
+    });
+  });
+
+  describe('Statistics and Aggregations', () => {
+    beforeEach(async () => {
       // Insert diverse test data
       const testDocs = [
         {
@@ -298,6 +330,10 @@ describe('MongoService Integration Tests', () => {
             protocol: 'mqtt',
             channelsCount: 2,
             serversCount: 1,
+            createdAt: new Date(),
+            updatedAt: new Date(),
+            processedAt: new Date()
+          },
             createdAt: new Date(),
             updatedAt: new Date(),
             processedAt: new Date()
@@ -321,6 +357,10 @@ describe('MongoService Integration Tests', () => {
             updatedAt: new Date(),
             processedAt: new Date()
           },
+            createdAt: new Date(),
+            updatedAt: new Date(),
+            processedAt: new Date()
+          },
           searchableFields: {
             title: 'api 2',
             description: 'second api',
@@ -336,6 +376,10 @@ describe('MongoService Integration Tests', () => {
             protocol: 'ws',
             channelsCount: 1,
             serversCount: 2,
+            createdAt: new Date(),
+            updatedAt: new Date(),
+            processedAt: new Date()
+          },
             createdAt: new Date(),
             updatedAt: new Date(),
             processedAt: new Date()
@@ -360,19 +404,17 @@ describe('MongoService Integration Tests', () => {
 
     test('should get document statistics', async () => {
       const stats = await mongoService.getDocumentStatistics();
-      
+
       expect(stats.totalDocuments).toBe(3);
       expect(stats.protocolDistribution).toHaveLength(2);
       expect(stats.versionDistribution).toHaveLength(2);
 
-      // Check protocol distribution
       const mqttStat = stats.protocolDistribution.find(p => p._id === 'mqtt');
       expect(mqttStat.count).toBe(2);
 
       const wsStat = stats.protocolDistribution.find(p => p._id === 'ws');
       expect(wsStat.count).toBe(1);
 
-      // Check version distribution
       const v1Stat = stats.versionDistribution.find(v => v._id === '1.0.0');
       expect(v1Stat.count).toBe(2);
 

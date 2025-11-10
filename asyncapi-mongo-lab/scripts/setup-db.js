@@ -128,11 +128,11 @@ class DatabaseSetup {
         };
 
         const originalDocument = {
+          raw: processed.original,
+          converted: processed.converted,
           filename: file,
           relativePath: path.relative(process.cwd(), filePath),
           format: extension,
-          content: processed.original,
-          converted: processed.converted,
           importedAt: importTimestamp
         };
 

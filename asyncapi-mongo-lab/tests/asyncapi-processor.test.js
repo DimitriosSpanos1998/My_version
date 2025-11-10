@@ -1,35 +1,43 @@
-process.env.USE_IN_MEMORY_MONGO = 'true';
-process.env.DB_NAME = 'asyncapi-processor-test';
-
 const AsyncAPIProcessor = require('../src/processors/asyncapi-processor');
 const MongoService = require('../src/services/mongo-service');
+const { createMockDatabaseConfig } = require('./helpers/mock-database-config');
 
 describe('AsyncAPI MongoDB Lab Tests', () => {
   let processor;
   let mongoService;
+  let mockConfig;
 
-  beforeAll(() => {
+  const clearCollections = async () => {
+    if (!mongoService || !mongoService.isDatabaseConnected()) {
+      return;
+    }
+
+    await Promise.all([
+      mongoService.getCollection('normalized').deleteMany({}),
+      mongoService.getCollection('original').deleteMany({})
+    ]);
+  };
+
+  beforeAll(async () => {
     processor = new AsyncAPIProcessor();
-    mongoService = new MongoService();
+    mockConfig = createMockDatabaseConfig();
+    mongoService = new MongoService(mockConfig);
+    await mongoService.connect();
   });
 
   afterAll(async () => {
+    await clearCollections();
     await mongoService.close();
   });
 
   afterEach(async () => {
-    if (mongoService.isDatabaseConnected()) {
-      await Promise.all([
-        mongoService.getCollection('normalized').deleteMany({}),
-        mongoService.getCollection('original').deleteMany({})
-      ]);
-    }
+    await clearCollections();
   });
 
   describe('AsyncAPIProcessor', () => {
     test('should load and parse AsyncAPI file', async () => {
       const result = await processor.processAsyncAPIFile('src/examples/sample-asyncapi.yaml');
-      
+
       expect(result).toBeDefined();
       expect(result.normalized).toBeDefined();
       expect(result.summary.title).toBe('User Service API');
@@ -53,7 +61,6 @@ describe('AsyncAPI MongoDB Lab Tests', () => {
       const invalidSpec = {
         info: {
           title: 'Test API'
-          // Missing version
         }
       };
 
@@ -64,10 +71,6 @@ describe('AsyncAPI MongoDB Lab Tests', () => {
   });
 
   describe('MongoService', () => {
-    beforeAll(async () => {
-      await mongoService.connect();
-    });
-
     test('should connect to MongoDB', () => {
       expect(mongoService.isDatabaseConnected()).toBe(true);
     });
@@ -81,22 +84,27 @@ describe('AsyncAPI MongoDB Lab Tests', () => {
 
       const foundDoc = await mongoService.findAsyncAPIDocumentById(insertResult.insertedId.toString());
       expect(foundDoc).toBeDefined();
-      expect(foundDoc).not.toBeNull();
       expect(foundDoc.summary.title).toBe(processed.summary.title);
 
-      // Clean up
       await mongoService.deleteAsyncAPIDocument(insertResult.insertedId.toString());
     });
 
     test('should search documents by text', async () => {
-      const results = await mongoService.searchAsyncAPIDocuments('test');
+      const processed = await processor.processAsyncAPIFile('src/examples/sample-asyncapi.yaml');
+      await mongoService.insertAsyncAPIDocument(processed);
+
+      const results = await mongoService.searchAsyncAPIDocuments('user');
       expect(Array.isArray(results)).toBe(true);
+      expect(results.length).toBeGreaterThan(0);
     });
 
     test('should get document statistics', async () => {
+      const processed = await processor.processAsyncAPIFile('src/examples/sample-asyncapi.yaml');
+      await mongoService.insertAsyncAPIDocument(processed);
+
       const stats = await mongoService.getDocumentStatistics();
       expect(stats).toBeDefined();
-      expect(stats.totalDocuments).toBeDefined();
+      expect(stats.totalDocuments).toBeGreaterThan(0);
       expect(Array.isArray(stats.protocolDistribution)).toBe(true);
     });
   });

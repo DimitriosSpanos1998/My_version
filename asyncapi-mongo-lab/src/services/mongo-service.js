@@ -1,14 +1,17 @@
 const { ObjectId } = require('mongodb');
-const yaml = require('yaml');
 const databaseConfig = require('../config/database');
 
 class MongoService {
+  constructor(config = databaseConfig) {
+    this.databaseConfig = config;
+  }
+
   /**
    * Connect to MongoDB database
    * @returns {Promise<Object>} Database instance
    */
   async connect() {
-    return await databaseConfig.connect();
+    return await this.databaseConfig.connect();
   }
 
   /**
@@ -17,7 +20,7 @@ class MongoService {
    * @returns {Object} Collection instance
    */
   getCollection(collectionType = 'normalized') {
-    return databaseConfig.getCollection(collectionType);
+    return this.databaseConfig.getCollection(collectionType);
   }
 
   getNormalizedCollection() {
@@ -217,72 +220,66 @@ class MongoService {
     return originalContent;
   }
 
-  parseOriginalContentToObject(originalContent) {
-    if (typeof originalContent !== 'string') {
-      return null;
-    }
-
-    const trimmed = originalContent.trim();
-    if (!trimmed) {
-      return null;
-    }
-
-    try {
-      if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
-        return JSON.parse(trimmed);
-      }
-    } catch (error) {
-      // Fallback to YAML parsing below
-    }
-
-    try {
-      return yaml.parse(trimmed);
-    } catch (error) {
-      return null;
-    }
-  }
-
   buildOriginalDocument(original, normalizedDocument, normalizedId) {
-    let documentContent = null;
+    const now = new Date();
     let rawContent = null;
+    let metadata = null;
+    let converted = undefined;
 
-    if (original && typeof original === 'object' && !Array.isArray(original)) {
+    if (typeof original === 'string') {
+      rawContent = original;
+    } else if (original && typeof original === 'object' && !Array.isArray(original)) {
       const cloned = JSON.parse(JSON.stringify(original));
-      if (cloned.raw || cloned.rawContent) {
-        rawContent = cloned.raw ?? cloned.rawContent;
+
+      if (typeof cloned.raw === 'string') {
+        rawContent = cloned.raw;
         delete cloned.raw;
+      }
+
+      if (!rawContent && typeof cloned.rawContent === 'string') {
+        rawContent = cloned.rawContent;
         delete cloned.rawContent;
       }
-      documentContent = cloned;
-    } else if (typeof original === 'string') {
-      rawContent = original;
-      documentContent = this.parseOriginalContentToObject(original);
+
+      if (!rawContent && typeof cloned.content === 'string') {
+        rawContent = cloned.content;
+        delete cloned.content;
+      }
+
+      if (cloned.converted !== undefined) {
+        converted = cloned.converted;
+        delete cloned.converted;
+      }
+
+      if (cloned._id) {
+        delete cloned._id;
+      }
+
+      if (Object.keys(cloned).length > 0) {
+        metadata = cloned;
+      }
     }
 
-    if (!documentContent && normalizedDocument) {
-      documentContent = JSON.parse(JSON.stringify(normalizedDocument));
+    if (!rawContent && normalizedDocument) {
+      rawContent = JSON.stringify(normalizedDocument, null, 2);
     }
 
-    if (!documentContent) {
-      return null;
-    }
-
-    if (documentContent._id) {
-      delete documentContent._id;
-    }
-
-    const baseOriginalDocument = {
+    const originalDocument = {
       normalizedId,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-      document: documentContent
+      createdAt: now,
+      updatedAt: now,
+      raw: rawContent
     };
 
-    if (rawContent) {
-      baseOriginalDocument.rawContent = rawContent;
+    if (metadata) {
+      originalDocument.metadata = metadata;
     }
 
-    return baseOriginalDocument;
+    if (converted !== undefined) {
+      originalDocument.converted = converted;
+    }
+
+    return originalDocument;
   }
 
   /**
@@ -519,22 +516,31 @@ class MongoService {
   async getDocumentStatistics() {
     try {
       const collection = this.getNormalizedCollection();
-      
-      const totalCount = await collection.countDocuments();
-      const protocolStats = await collection.aggregate([
-        { $group: { _id: '$searchableFields.protocol', count: { $sum: 1 } } },
-        { $sort: { count: -1 } }
-      ]).toArray();
-      
-      const versionStats = await collection.aggregate([
-        { $group: { _id: '$searchableFields.version', count: { $sum: 1 } } },
-        { $sort: { count: -1 } }
-      ]).toArray();
+      const documents = await collection.find({}).toArray();
+
+      const totals = documents.reduce(
+        (acc, doc) => {
+          const protocol = doc?.searchableFields?.protocol || 'unknown';
+          const version = doc?.searchableFields?.version || 'unknown';
+
+          acc.total += 1;
+          acc.protocol.set(protocol, (acc.protocol.get(protocol) || 0) + 1);
+          acc.version.set(version, (acc.version.get(version) || 0) + 1);
+
+          return acc;
+        },
+        { total: 0, protocol: new Map(), version: new Map() }
+      );
+
+      const toSortedDistribution = map =>
+        Array.from(map.entries())
+          .map(([key, count]) => ({ _id: key, count }))
+          .sort((a, b) => b.count - a.count);
 
       const stats = {
-        totalDocuments: totalCount,
-        protocolDistribution: protocolStats,
-        versionDistribution: versionStats,
+        totalDocuments: totals.total,
+        protocolDistribution: toSortedDistribution(totals.protocol),
+        versionDistribution: toSortedDistribution(totals.version),
         lastUpdated: new Date()
       };
 
@@ -551,14 +557,14 @@ class MongoService {
    * @returns {boolean} Connection status
    */
   isDatabaseConnected() {
-    return databaseConfig.isDatabaseConnected();
+    return this.databaseConfig.isDatabaseConnected();
   }
 
   /**
    * Close database connection
    */
   async close() {
-    await databaseConfig.close();
+    await this.databaseConfig.close();
   }
 }
 
