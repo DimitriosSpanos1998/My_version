@@ -18,37 +18,44 @@ class DatabaseCleaner {
       await this.mongoService.connect();
       const normalizedCollection = this.mongoService.getCollection('normalized');
       const originalCollection = this.mongoService.getCollection('original');
+      const metadaCollection = this.mongoService.getCollection('metada');
 
-      const [normalizedBefore, originalBefore] = await Promise.all([
+      const [normalizedBefore, originalBefore, metadaBefore] = await Promise.all([
         normalizedCollection.countDocuments(),
-        originalCollection.countDocuments()
+        originalCollection.countDocuments(),
+        metadaCollection.countDocuments()
       ]);
 
       console.log(`📊 Normalized before cleanup: ${normalizedBefore}`);
       console.log(`📊 Original before cleanup: ${originalBefore}`);
+      console.log(`📊 Metada before cleanup: ${metadaBefore}`);
 
-      if (normalizedBefore === 0 && originalBefore === 0) {
+      if (normalizedBefore === 0 && originalBefore === 0 && metadaBefore === 0) {
         console.log('✅ Database is already clean!');
         return;
       }
 
-      const [normalizedResult, originalResult] = await Promise.all([
+      const [normalizedResult, originalResult, metadaResult] = await Promise.all([
         normalizedCollection.deleteMany({}),
-        originalCollection.deleteMany({})
+        originalCollection.deleteMany({}),
+        metadaCollection.deleteMany({})
       ]);
 
       console.log(`🗑️ Deleted ${normalizedResult.deletedCount} normalized documents`);
       console.log(`🗑️ Deleted ${originalResult.deletedCount} original documents`);
+      console.log(`🗑️ Deleted ${metadaResult.deletedCount} metada documents`);
 
-      const [normalizedAfter, originalAfter] = await Promise.all([
+      const [normalizedAfter, originalAfter, metadaAfter] = await Promise.all([
         normalizedCollection.countDocuments(),
-        originalCollection.countDocuments()
+        originalCollection.countDocuments(),
+        metadaCollection.countDocuments()
       ]);
 
       console.log(`📊 Normalized after cleanup: ${normalizedAfter}`);
       console.log(`📊 Original after cleanup: ${originalAfter}`);
+      console.log(`📊 Metada after cleanup: ${metadaAfter}`);
 
-      if (normalizedAfter === 0 && originalAfter === 0) {
+      if (normalizedAfter === 0 && originalAfter === 0 && metadaAfter === 0) {
         console.log('✅ Database cleaned successfully!');
       } else {
         console.log('⚠️ Some documents may still remain');
@@ -72,6 +79,7 @@ class DatabaseCleaner {
       await this.mongoService.connect();
       const normalizedCollection = this.mongoService.getCollection('normalized');
       const originalCollection = this.mongoService.getCollection('original');
+      const metadaCollection = this.mongoService.getCollection('metada');
 
       const cutoffDate = new Date();
       cutoffDate.setDate(cutoffDate.getDate() - days);
@@ -92,15 +100,19 @@ class DatabaseCleaner {
 
       const normalizedIds = docsToDelete.map(doc => doc._id);
 
-      const [normalizedResult, originalResult] = await Promise.all([
+      const [normalizedResult, originalResult, metadaResult] = await Promise.all([
         normalizedCollection.deleteMany({ _id: { $in: normalizedIds } }),
         normalizedIds.length
           ? originalCollection.deleteMany({ normalizedId: { $in: normalizedIds } })
+          : Promise.resolve({ deletedCount: 0 }),
+        normalizedIds.length
+          ? metadaCollection.deleteMany({ normalizedId: { $in: normalizedIds } })
           : Promise.resolve({ deletedCount: 0 })
       ]);
 
       console.log(`🗑️ Deleted ${normalizedResult.deletedCount} normalized documents`);
       console.log(`🗑️ Deleted ${originalResult.deletedCount || 0} original documents`);
+      console.log(`🗑️ Deleted ${metadaResult.deletedCount || 0} metada documents`);
 
       console.log('✅ Old documents cleaned successfully!');
 
