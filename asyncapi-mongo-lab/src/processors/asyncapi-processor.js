@@ -3,14 +3,19 @@ const { Parser } = require('@asyncapi/parser');
 const { convert } = require('@asyncapi/converter');
 const yaml = require('yaml');
 
+// DB config (προσαρμόσε το path αν το αρχείο σου είναι αλλού)
+const DatabaseConfig = require('../config/database');
+
 // --- Small helpers ---------------------------------------------------------
 const ensureArray = (v) => (Array.isArray(v) ? v : v == null ? [] : [v]);
 const lc = (s) => (typeof s === 'string' ? s.toLowerCase() : '');
 
 // --- Core class ------------------------------------------------------------
 class AsyncAPIProcessor {
-  constructor() {
+  constructor({ db } = {}) {
     this.supportedFormats = ['yaml', 'json', 'yml'];
+    // δέχεται dependency injection για tests (mock) ή χρησιμοποιεί το κανονικό DB
+    this.db = db || DatabaseConfig;
   }
 
   /** Load file from disk as UTF-8 string */
@@ -72,6 +77,95 @@ class AsyncAPIProcessor {
     }
 
     return validation;
+  }
+
+  /** Create a flat metadata view from the AsyncAPI document (works for v2 & v3) */
+  flattenMetadata(spec = {}) {
+    const info = spec.info || {};
+    const serversObj = spec.servers || {};
+    const channelsObj = spec.channels || {};
+
+    const getTags = () => {
+      const raw = Array.isArray(spec.tags) ? spec.tags : (Array.isArray(info.tags) ? info.tags : []);
+      return raw
+        .map((t) => (typeof t === 'string' ? t : t?.name))
+        .filter(Boolean);
+    };
+
+    // servers
+    const servers = Object.entries(serversObj).map(([name, s]) => ({
+      name,
+      url: s?.url,
+      protocol: s?.protocol,
+      description: s?.description
+    }));
+
+    // channels
+    const channels = Object.entries(channelsObj).map(([name, ch]) => ({
+      name,
+      description: ch?.description,
+      // v3 μπορεί να έχει channel-level servers
+      servers: Array.isArray(ch?.servers) ? ch.servers : undefined
+    }));
+
+    // operations (support both v3 `operations` και v2 publish/subscribe μέσα στα channels)
+    const opsV3 = Object.entries(spec.operations || {}).map(([key, op]) => ({
+      operationId: op?.operationId || key,
+      action: op?.action,         // send | receive (v3)
+      channel: op?.channel,
+      summary: op?.summary
+    }));
+
+    const opsV2 = Object.entries(channelsObj).flatMap(([chName, ch]) => {
+      const out = [];
+      if (ch?.publish) {
+        out.push({
+          operationId: ch.publish.operationId,
+          action: 'publish',
+          channel: chName,
+          summary: ch.publish.summary
+        });
+      }
+      if (ch?.subscribe) {
+        out.push({
+          operationId: ch.subscribe.operationId,
+          action: 'subscribe',
+          channel: chName,
+          summary: ch.subscribe.summary
+        });
+      }
+      return out;
+    });
+
+    // messages (components.messages)
+    const messagesObj = spec.components?.messages || {};
+    const messages = Object.entries(messagesObj).map(([name, msg]) => ({
+      name,
+      messageId: msg?.messageId,
+      title: msg?.title || msg?.name,
+      summary: msg?.summary
+    }));
+
+    // protocols list (dedup)
+    const protocols = Array.from(
+      new Set(servers.map((s) => s.protocol).filter(Boolean))
+    );
+
+    return {
+      id: spec.id || spec['x-id'] || '',
+      title: info.title || 'Untitled API',
+      version: info.version || '',
+      description: info.description || '',
+      tags: getTags(),
+      defaultContentType: spec.defaultContentType,
+      protocols,
+      serversCount: servers.length,
+      channelsCount: channels.length,
+      servers,
+      channels,
+      operations: [...opsV3, ...opsV2],
+      messages
+    };
   }
 
   /** Convert to v3 (only if needed) and stringify to target format */
@@ -165,25 +259,111 @@ class AsyncAPIProcessor {
     };
   }
 
-  /** End-to-end helper: load → parse → validate → convert → normalize → summarize */
+  // ---------------------- NEW: originals & metada persistence ----------------------
+
+  detectFormat(filePath, originalContent) {
+    const lower = (filePath || '').toLowerCase();
+    if (lower.endsWith('.json')) return 'json';
+    if (lower.endsWith('.yaml') || lower.endsWith('.yml')) return 'yaml';
+    const trimmed = (originalContent || '').trim();
+    if (trimmed.startsWith('{') || trimmed.startsWith('[')) return 'json';
+    return 'yaml';
+  }
+
+  /**
+   * Store the original file (raw string) into 'original' collection
+   */
+  async saveOriginal({ filePath, originalContent, normalizedId = null, extra = {} } = {}) {
+    await this.db.connect();
+    const originals = this.db.getCollection('original');
+
+    const format = this.detectFormat(filePath, originalContent);
+    const contentType = format === 'json' ? 'application/json' : 'text/yaml';
+
+    const doc = {
+      normalizedId: normalizedId || null,
+      raw: originalContent,   // as-is
+      format,
+      contentType,
+      filePath,
+      createdAt: new Date(),
+      ...extra
+    };
+
+    const { insertedId } = await originals.insertOne(doc);
+    return insertedId;
+  }
+
+  /**
+   * Store flattened metadata into 'metada' collection
+   */
+  async saveMetada({ spec, filePath, originalId = null, normalizedId = null, extra = {} } = {}) {
+    if (!spec) throw new Error('Missing spec for metada insert');
+    await this.db.connect();
+    const metada = this.db.getCollection('metada');
+
+    const flat = this.flattenMetadata(spec);
+
+    const doc = {
+      ...flat,
+      originalId: originalId || null,
+      normalizedId: normalizedId || null,
+      filePath,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      ...extra
+    };
+
+    const { insertedId } = await metada.insertOne(doc);
+    return insertedId;
+  }
+
+  /** End-to-end helper: load → parse → validate → convert → normalize → summarize → persist originals & metada */
   async process(filePath, targetFormat = 'json') {
     try {
       console.log(`🚀 Starting AsyncAPI processing for: ${filePath}`);
       const original = await this.load(filePath);
+
+      // 1) Save original as-is
+      const originalId = await this.saveOriginal({ filePath, originalContent: original });
+      console.log(`🗄️ Stored original with _id: ${originalId}`);
+
+      // 2) Parse/validate
       const parsed = await this.parse(original);
       const validation = this.validateAsyncAPI(parsed);
       if (!validation.isValid) {
         throw new Error(`Validation failed: ${validation.errors.join(', ')}`);
       }
 
+      // 3) Convert (to v3 if needed) and normalize/summary/searchFields/flatten
       const conversion = await this.convert(original, parsed, targetFormat);
       const normalized = this.normalize(conversion.document);
       const summary = this.buildSummary(conversion.document);
       const searchableFields = this.buildSearchableFields(summary);
       const flattened = this.flattenMetadata(conversion.document);
 
+      // 4) Save metada
+      const metadaId = await this.saveMetada({
+        spec: conversion.document,
+        filePath,
+        originalId
+        // normalizedId: αν αργότερα δημιουργείς doc στη normalized συλλογή, πέρασέ το εδώ
+      });
+      console.log(`🧾 Stored metada with _id: ${metadaId}`);
+
       console.log('✅ AsyncAPI processing completed successfully');
-      return { original, parsed, converted: conversion.content, normalized, summary, searchableFields, validation };
+      return {
+        original,
+        parsed,
+        converted: conversion.content,
+        normalized,
+        summary,
+        searchableFields,
+        flattened,
+        validation,
+        originalId,
+        metadaId
+      };
     } catch (error) {
       console.error('❌ AsyncAPI processing failed:', error.message);
       throw error;
