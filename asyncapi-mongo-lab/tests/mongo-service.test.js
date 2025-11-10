@@ -82,7 +82,7 @@ describe('MongoService Integration Tests', () => {
       expect(storedOriginal.metadata.title).toBe('CRUD Test API');
       expect(storedOriginal.metadata.version).toBe('1.0.0');
       expect(storedOriginal.searchableFields.title).toBe('crud test api');
-      expect(storedOriginal.content).toBeUndefined();
+      expect(storedOriginal.content).toEqual({ title: 'CRUD Test API' });
 
       // Read
       const foundDoc = await mongoService.findAsyncAPIDocumentById(docId);

@@ -210,34 +210,67 @@ class MongoService {
   }
 
   buildOriginalDocument(original, normalizedDocument, metadataId, normalizedId, sanitizedMetadata) {
-    let baseDocument = null;
-
-    if (original && typeof original === 'object' && !Array.isArray(original)) {
-      baseDocument = { ...original };
-    } else if (normalizedDocument) {
-      baseDocument = { ...normalizedDocument };
-    }
-
-    if (!baseDocument) {
+    if (!original && !normalizedDocument) {
       return null;
     }
 
-    if (baseDocument._id) {
-      delete baseDocument._id;
-    }
+    const cloneObject = value => JSON.parse(JSON.stringify(value));
 
-    const metadata = baseDocument.metadata
-      ? this.sanitizeMetadata(baseDocument.metadata)
+    const normalizeContent = value => {
+      if (value === undefined || value === null) {
+        return null;
+      }
+
+      if (Buffer.isBuffer(value)) {
+        const text = value.toString('utf8');
+        return normalizeContent(text);
+      }
+
+      if (typeof value === 'string') {
+        const trimmed = value.trim();
+
+        if (!trimmed) {
+          return '';
+        }
+
+        try {
+          return JSON.parse(trimmed);
+        } catch (error) {
+          return value;
+        }
+      }
+
+      if (typeof value === 'object') {
+        return cloneObject(value);
+      }
+
+      return value;
+    };
+
+    const metadata = normalizedDocument?.metadata
+      ? this.sanitizeMetadata(normalizedDocument.metadata)
       : { ...sanitizedMetadata };
 
-    return {
-      ...baseDocument,
+    const document = {
       metadata,
       metadataId,
       normalizedId,
       createdAt: metadata.createdAt,
       updatedAt: metadata.updatedAt
     };
+
+    if (normalizedDocument?.searchableFields) {
+      document.searchableFields = { ...normalizedDocument.searchableFields };
+    }
+
+    const contentSource = original ?? normalizedDocument;
+    const normalizedContent = normalizeContent(contentSource);
+
+    if (normalizedContent !== null && normalizedContent !== undefined) {
+      document.content = normalizedContent;
+    }
+
+    return document;
   }
 
   /**
