@@ -41,30 +41,27 @@ class MongoService {
       throw new Error('AsyncAPI data is required');
     }
 
-    const normalizedSource =
-      asyncAPIData.normalized != null ? asyncAPIData.normalized : asyncAPIData;
-
-    const normalizedData = JSON.parse(JSON.stringify(normalizedSource));
+    const normalizedData = asyncAPIData.normalized
+      ? JSON.parse(JSON.stringify(asyncAPIData.normalized))
+      : JSON.parse(JSON.stringify(asyncAPIData));
 
     if (normalizedData._id) {
       delete normalizedData._id;
     }
 
-    if (normalizedData.summary) {
-      delete normalizedData.summary;
-    }
-
-    if (normalizedData.searchableFields) {
-      delete normalizedData.searchableFields;
-    }
-
-    const specForSummary = normalizedData.document ?? normalizedData;
-
-    const summary = this.ensureSummary(asyncAPIData.summary ?? {}, specForSummary);
+    const summary = this.ensureSummary(
+      asyncAPIData.summary ?? normalizedData.summary ?? {},
+      normalizedData
+    );
 
     const searchableFields = asyncAPIData.searchableFields
       ? { ...asyncAPIData.searchableFields }
-      : this.buildSearchableFieldsFromSummary(summary);
+      : normalizedData.searchableFields
+        ? { ...normalizedData.searchableFields }
+        : this.buildSearchableFieldsFromSummary(summary);
+
+    normalizedData.summary = summary;
+    normalizedData.searchableFields = searchableFields;
 
     const originalContent = this.prepareOriginalContent(
       asyncAPIData.original ??
@@ -83,48 +80,54 @@ class MongoService {
 
   ensureSummary(summary = {}, normalizedData = {}) {
     const cloned = { ...summary };
-    const spec = normalizedData?.document ?? normalizedData;
+    const now = new Date();
 
-    if (!cloned.title && spec?.info?.title) {
-      cloned.title = spec.info.title;
+    if (!cloned.title && normalizedData?.info?.title) {
+      cloned.title = normalizedData.info.title;
     }
 
-    if (!cloned.version && spec?.info?.version) {
-      cloned.version = spec.info.version;
+    if (!cloned.version && normalizedData?.info?.version) {
+      cloned.version = normalizedData.info.version;
     }
 
-    if (!cloned.description && spec?.info?.description) {
-      cloned.description = spec.info.description;
+    if (!cloned.description && normalizedData?.info?.description) {
+      cloned.description = normalizedData.info.description;
     }
 
     if (!cloned.protocol) {
-      const firstProtocol = Object.values(spec?.servers ?? {})
+      const firstProtocol = Object.values(normalizedData?.servers ?? {})
         .map(server => server?.protocol)
         .find(Boolean);
       cloned.protocol = firstProtocol || 'unknown';
     }
 
-    const channelsCount = Array.isArray(spec?.channels)
-      ? spec.channels.length
-      : spec?.channels
-        ? Object.keys(spec.channels).length
+    const channelsCount = Array.isArray(normalizedData?.channels)
+      ? normalizedData.channels.length
+      : normalizedData?.channels
+        ? Object.keys(normalizedData.channels).length
         : 0;
     if (cloned.channelsCount == null) {
       cloned.channelsCount = channelsCount;
     }
 
-    const serversCount = Array.isArray(spec?.servers)
-      ? spec.servers.length
-      : spec?.servers
-        ? Object.keys(spec.servers).length
+    const serversCount = Array.isArray(normalizedData?.servers)
+      ? normalizedData.servers.length
+      : normalizedData?.servers
+        ? Object.keys(normalizedData.servers).length
         : 0;
     if (cloned.serversCount == null) {
       cloned.serversCount = serversCount;
     }
 
-    if (!cloned.defaultContentType && spec?.defaultContentType) {
-      cloned.defaultContentType = spec.defaultContentType;
+    if (!cloned.defaultContentType && normalizedData?.defaultContentType) {
+      cloned.defaultContentType = normalizedData.defaultContentType;
     }
+
+    const createdAt = cloned.createdAt ? new Date(cloned.createdAt) : now;
+    const updatedAt = cloned.updatedAt ? new Date(cloned.updatedAt) : createdAt;
+
+    cloned.createdAt = createdAt;
+    cloned.updatedAt = updatedAt;
 
     return cloned;
   }
@@ -162,7 +165,7 @@ class MongoService {
 
     try {
       const normalizedDocument = {
-        normalized,
+        ...normalized,
         summary,
         searchableFields
       };
@@ -218,7 +221,10 @@ class MongoService {
   }
 
   buildOriginalDocument(original, normalizedDocument, normalizedId) {
+    const now = new Date();
     let rawContent = null;
+    let metadata = null;
+    let converted = undefined;
 
     if (typeof original === 'string') {
       rawContent = original;
@@ -240,19 +246,40 @@ class MongoService {
         delete cloned.content;
       }
 
+      if (cloned.converted !== undefined) {
+        converted = cloned.converted;
+        delete cloned.converted;
+      }
+
       if (cloned._id) {
         delete cloned._id;
       }
+
+      if (Object.keys(cloned).length > 0) {
+        metadata = cloned;
+      }
     }
 
-    if (!rawContent) {
-      return null;
+    if (!rawContent && normalizedDocument) {
+      rawContent = JSON.stringify(normalizedDocument, null, 2);
     }
 
-    return {
+    const originalDocument = {
       normalizedId,
+      createdAt: now,
+      updatedAt: now,
       raw: rawContent
     };
+
+    if (metadata) {
+      originalDocument.metadata = metadata;
+    }
+
+    if (converted !== undefined) {
+      originalDocument.converted = converted;
+    }
+
+    return originalDocument;
   }
 
   /**
@@ -267,7 +294,7 @@ class MongoService {
       
       const {
         limit = 10,
-        sort = { _id: -1 },
+        sort = { 'summary.createdAt': -1 },
         projection = null
       } = options;
 
@@ -321,17 +348,25 @@ class MongoService {
       const collection = this.getNormalizedCollection();
       const objectId = typeof id === 'string' ? new ObjectId(id) : id;
 
+      const updateTimestamp = new Date();
       const setUpdates = {};
+      let affectsSummary = false;
 
       Object.entries(updates || {}).forEach(([key, value]) => {
         if (key === 'summary' && value && typeof value === 'object') {
+          affectsSummary = true;
           Object.entries(value).forEach(([innerKey, innerValue]) => {
             setUpdates[`summary.${innerKey}`] = innerValue;
           });
         } else {
           setUpdates[key] = value;
+          if (key.startsWith('summary.')) {
+            affectsSummary = true;
+          }
         }
       });
+
+      setUpdates['summary.updatedAt'] = updateTimestamp;
 
       const result = await collection.updateOne(
         { _id: objectId },
@@ -356,6 +391,10 @@ class MongoService {
           );
         }
 
+        await this.getOriginalCollection().updateMany(
+          { normalizedId: objectId },
+          { $set: { updatedAt: updateTimestamp } }
+        );
       }
 
       console.log(`✏️ Document updated: ${result.modifiedCount} field(s) modified`);
@@ -501,7 +540,8 @@ class MongoService {
       const stats = {
         totalDocuments: totals.total,
         protocolDistribution: toSortedDistribution(totals.protocol),
-        versionDistribution: toSortedDistribution(totals.version)
+        versionDistribution: toSortedDistribution(totals.version),
+        lastUpdated: new Date()
       };
 
       console.log('📊 Document statistics retrieved');

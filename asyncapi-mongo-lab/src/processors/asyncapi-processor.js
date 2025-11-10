@@ -262,11 +262,11 @@ async convertAsyncAPI(originalContent, parsedSpec, targetFormat = 'json') {
    * @param {Object} asyncAPISpec - Parsed AsyncAPI object
    * @returns {Object} Normalized AsyncAPI specification
    */
-  normalizeAsyncAPIData(conversionResult) {
+  normalizeAsyncAPIData(asyncAPISpec) {
     try {
-      const normalized = JSON.parse(JSON.stringify(conversionResult));
+      const normalized = JSON.parse(JSON.stringify(asyncAPISpec));
 
-      console.log('🔧 AsyncAPI conversion output preserved for normalization');
+      console.log('🔧 AsyncAPI data normalized (raw JSON preserved)');
       return normalized;
     } catch (error) {
       console.error('❌ Error normalizing AsyncAPI data:', error.message);
@@ -277,6 +277,7 @@ async convertAsyncAPI(originalContent, parsedSpec, targetFormat = 'json') {
   buildSummary(asyncAPISpec) {
     try {
       const structure = buildSummaryStructure(asyncAPISpec);
+      const now = new Date();
 
       const primaryProtocol =
         structure.servers.find(server => server.protocol)?.protocol || 'unknown';
@@ -291,7 +292,10 @@ async convertAsyncAPI(originalContent, parsedSpec, targetFormat = 'json') {
         channelsCount: structure.channels.length,
         serversCount: structure.servers.length,
         tags: structure.service.tags || [],
-        defaultContentType: structure.service.defaultContentType
+        defaultContentType: structure.service.defaultContentType,
+        createdAt: now,
+        updatedAt: now,
+        processedAt: now
       };
 
       return summary;
@@ -386,7 +390,7 @@ async convertAsyncAPI(originalContent, parsedSpec, targetFormat = 'json') {
       const conversion = await this.convertAsyncAPI(content, parsed, targetFormat);
 
       // Normalize for MongoDB
-      const normalized = this.normalizeAsyncAPIData(conversion);
+      const normalized = this.normalizeAsyncAPIData(conversion.document);
 
       const summary = this.buildSummary(conversion.document);
       const searchableFields = this.buildSearchableFields(summary);
