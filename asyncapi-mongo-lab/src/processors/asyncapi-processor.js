@@ -69,7 +69,7 @@ function extractOperations(asyncapi, channel) {
   });
 }
 
-function buildMetadataStructure(asyncapi, serviceId) {
+function buildSummaryStructure(asyncapi, serviceId) {
   const info = asyncapi?.info ?? {};
 
   const service = {
@@ -260,7 +260,7 @@ async convertAsyncAPI(originalContent, parsedSpec, targetFormat = 'json') {
   /**
    * Normalize AsyncAPI data for MongoDB storage
    * @param {Object} asyncAPISpec - Parsed AsyncAPI object
-   * @returns {Object} Normalized data with metadata
+   * @returns {Object} Normalized AsyncAPI specification
    */
   normalizeAsyncAPIData(asyncAPISpec) {
     try {
@@ -274,15 +274,15 @@ async convertAsyncAPI(originalContent, parsedSpec, targetFormat = 'json') {
     }
   }
 
-  buildMetadata(asyncAPISpec) {
+  buildSummary(asyncAPISpec) {
     try {
-      const structure = buildMetadataStructure(asyncAPISpec);
+      const structure = buildSummaryStructure(asyncAPISpec);
       const now = new Date();
 
       const primaryProtocol =
         structure.servers.find(server => server.protocol)?.protocol || 'unknown';
 
-      const metadata = {
+      const summary = {
         ...structure,
         title: structure.service.title || 'Untitled API',
         version: structure.service.version || '1.0.0',
@@ -298,23 +298,23 @@ async convertAsyncAPI(originalContent, parsedSpec, targetFormat = 'json') {
         processedAt: now
       };
 
-      return metadata;
+      return summary;
     } catch (error) {
-      console.error('❌ Error building metadata:', error.message);
+      console.error('❌ Error building summary information:', error.message);
       throw error;
     }
   }
 
-  buildSearchableFields(metadata = {}) {
-    const service = metadata.service || {};
-    const tags = metadata.tags || service.tags || [];
+  buildSearchableFields(summary = {}) {
+    const service = summary.service || {};
+    const tags = summary.tags || service.tags || [];
 
-    const protocol = (metadata.protocol || '').toString().toLowerCase();
+    const protocol = (summary.protocol || '').toString().toLowerCase();
 
     return {
-      title: (metadata.title || service.title || '').toString().toLowerCase(),
-      description: (metadata.description || service.description || '').toString().toLowerCase(),
-      version: metadata.version || service.version || '',
+      title: (summary.title || service.title || '').toString().toLowerCase(),
+      description: (summary.description || service.description || '').toString().toLowerCase(),
+      version: summary.version || service.version || '',
       protocol,
       tags: ensureArray(tags)
         .map(tag => tag.toString().toLowerCase())
@@ -392,8 +392,8 @@ async convertAsyncAPI(originalContent, parsedSpec, targetFormat = 'json') {
       // Normalize for MongoDB
       const normalized = this.normalizeAsyncAPIData(conversion.document);
 
-      const metadata = this.buildMetadata(conversion.document);
-      const searchableFields = this.buildSearchableFields(metadata);
+      const summary = this.buildSummary(conversion.document);
+      const searchableFields = this.buildSearchableFields(summary);
 
       console.log('✅ AsyncAPI processing completed successfully');
 
@@ -402,7 +402,7 @@ async convertAsyncAPI(originalContent, parsedSpec, targetFormat = 'json') {
         parsed: parsed,
         converted: conversion.content,
         normalized: normalized,
-        metadata,
+        summary,
         searchableFields,
         validation: validation
       };

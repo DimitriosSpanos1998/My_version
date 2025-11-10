@@ -59,18 +59,17 @@ class AsyncAPIMongoLab {
         // Process the AsyncAPI file
         const result = await this.processor.processAsyncAPIFile(filePath, 'json');
 
-        // Insert into MongoDB (original, normalized, and metadata collections)
+        // Insert into MongoDB (normalized summary plus original documents)
         const insertResult = await this.mongoService.insertAsyncAPIDocument(result);
 
-        console.log(`✅ Successfully processed and stored: ${result.metadata.title} v${result.metadata.version}`);
+        console.log(`✅ Successfully processed and stored: ${result.summary.title} v${result.summary.version}`);
         console.log(`   Document ID: ${insertResult.insertedId}`);
-        console.log(`   Metadata ID: ${insertResult.metadataId}`);
         if (insertResult.originalId) {
           console.log(`   Original ID: ${insertResult.originalId}`);
         }
-        console.log(`   Protocol: ${result.metadata.protocol}`);
-        console.log(`   Channels: ${result.metadata.channelsCount}`);
-        console.log(`   Servers: ${result.metadata.serversCount}`);
+        console.log(`   Protocol: ${result.summary.protocol}`);
+        console.log(`   Channels: ${result.summary.channelsCount}`);
+        console.log(`   Servers: ${result.summary.serversCount}`);
         
       } catch (error) {
         console.error(`❌ Error processing ${filePath}:`, error.message);
@@ -91,7 +90,7 @@ class AsyncAPIMongoLab {
 
     if (allDocs.length > 0) {
       const firstDoc = allDocs[0];
-      console.log(`   First document: ${firstDoc.metadata.title} (ID: ${firstDoc._id})`);
+      console.log(`   First document: ${firstDoc.summary.title} (ID: ${firstDoc._id})`);
 
       // READ: Find by protocol
       console.log('\n🔍 READ: Finding documents by protocol...');
@@ -111,8 +110,8 @@ class AsyncAPIMongoLab {
       const updateResult = await this.mongoService.updateAsyncAPIDocument(
         firstDoc._id.toString(),
         {
-          'metadata.description': 'Updated description via MongoDB lab',
-          'metadata.tags': ['updated', 'mongodb-lab']
+          'summary.description': 'Updated description via MongoDB lab',
+          'summary.tags': ['updated', 'mongodb-lab']
         }
       );
       console.log(`   Updated ${updateResult.modifiedCount} field(s)`);
@@ -120,7 +119,7 @@ class AsyncAPIMongoLab {
       // READ: Verify update
       console.log('\n🔍 READ: Verifying update...');
       const updatedDoc = await this.mongoService.findAsyncAPIDocumentById(firstDoc._id.toString());
-      console.log(`   Updated description: ${updatedDoc.metadata.description}`);
+      console.log(`   Updated description: ${updatedDoc.summary.description}`);
 
       // DELETE: Delete a document (only if we have more than one)
       if (allDocs.length > 1) {
@@ -177,7 +176,7 @@ class AsyncAPIMongoLab {
       // Find documents with specific criteria
       console.log('\n🔍 Finding documents with channels > 2...');
       const complexQuery = await this.mongoService.findAsyncAPIDocuments({
-        'metadata.channelsCount': { $gt: 2 }
+        'summary.channelsCount': { $gt: 2 }
       });
       console.log(`   Found ${complexQuery.length} documents with more than 2 channels`);
 
@@ -186,7 +185,7 @@ class AsyncAPIMongoLab {
       today.setHours(0, 0, 0, 0);
       console.log('\n🔍 Finding documents created today...');
       const todayDocs = await this.mongoService.findAsyncAPIDocuments({
-        'metadata.createdAt': { $gte: today }
+        'summary.createdAt': { $gte: today }
       });
       console.log(`   Found ${todayDocs.length} documents created today`);
 
@@ -196,9 +195,9 @@ class AsyncAPIMongoLab {
       const aggregationResult = await collection.aggregate([
         {
           $group: {
-            _id: '$metadata.protocol',
-            avgChannels: { $avg: '$metadata.channelsCount' },
-            avgServers: { $avg: '$metadata.serversCount' },
+            _id: '$summary.protocol',
+            avgChannels: { $avg: '$summary.channelsCount' },
+            avgServers: { $avg: '$summary.serversCount' },
             count: { $sum: 1 }
           }
         },

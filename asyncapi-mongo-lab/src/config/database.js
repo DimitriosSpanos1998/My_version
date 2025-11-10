@@ -1,5 +1,4 @@
 const { MongoClient } = require('mongodb');
-const InMemoryDatabase = require('./in-memory-database');
 require('dotenv').config();
 
 class DatabaseConfig {
@@ -7,7 +6,6 @@ class DatabaseConfig {
     this.client = null;
     this.db = null;
     this.isConnected = false;
-    this.isInMemory = false;
   }
 
   /**
@@ -20,8 +18,7 @@ class DatabaseConfig {
       normalized:
         process.env.NORMALIZED_COLLECTION_NAME ||
         process.env.COLLECTION_NAME ||
-        'asyncapi_normalized',
-      metadata: process.env.METADATA_COLLECTION_NAME || 'asyncapi_metadata'
+        'asyncapi_normalized'
     };
   }
 
@@ -50,22 +47,11 @@ class DatabaseConfig {
         return this.db;
       }
 
-      if (process.env.USE_IN_MEMORY_MONGO === 'true') {
-        console.log('🧪 Using in-memory MongoDB instance');
-        this.db = new InMemoryDatabase();
-        this.isConnected = true;
-        this.isInMemory = true;
-        return this.db;
-      }
-
       const uri = process.env.MONGODB_URI || 'mongodb://localhost:27017/asyncapi-lab';
       const dbName = process.env.DB_NAME || 'asyncapi-lab';
 
       console.log('🔌 Connecting to MongoDB...');
-      this.client = new MongoClient(uri, {
-        useNewUrlParser: true,
-        useUnifiedTopology: true,
-      });
+      this.client = new MongoClient(uri);
 
       await this.client.connect();
       this.db = this.client.db(dbName);
@@ -105,15 +91,6 @@ class DatabaseConfig {
    * Close database connection
    */
   async close() {
-    if (this.isInMemory && this.db) {
-      this.db.close();
-      this.db = null;
-      this.isConnected = false;
-      this.isInMemory = false;
-      console.log('🧪 In-memory MongoDB connection closed');
-      return;
-    }
-
     if (this.client) {
       await this.client.close();
       this.isConnected = false;
@@ -138,7 +115,6 @@ class DatabaseConfig {
   async createIndexes() {
     try {
       await this.createNormalizedIndexes();
-      await this.createMetadataIndexes();
       await this.createOriginalIndexes();
       console.log('📊 Database indexes created successfully');
     } catch (error) {
@@ -155,12 +131,11 @@ class DatabaseConfig {
 
     await this.dropCollectionIndexes(collection, 'normalized');
 
-    await collection.createIndex({ metadataId: 1 }, { name: 'metadata_id_idx' });
-    await collection.createIndex({ 'metadata.title': 1 }, { name: 'metadata_title_idx' });
-    await collection.createIndex({ 'metadata.version': 1 }, { name: 'metadata_version_idx' });
-    await collection.createIndex({ 'metadata.protocol': 1 }, { name: 'metadata_protocol_idx' });
-    await collection.createIndex({ 'metadata.createdAt': 1 }, { name: 'metadata_created_at_idx' });
-    await collection.createIndex({ 'metadata.updatedAt': 1 }, { name: 'metadata_updated_at_idx' });
+    await collection.createIndex({ 'summary.title': 1 }, { name: 'summary_title_idx' });
+    await collection.createIndex({ 'summary.version': 1 }, { name: 'summary_version_idx' });
+    await collection.createIndex({ 'summary.protocol': 1 }, { name: 'summary_protocol_idx' });
+    await collection.createIndex({ 'summary.createdAt': 1 }, { name: 'summary_created_at_idx' });
+    await collection.createIndex({ 'summary.updatedAt': 1 }, { name: 'summary_updated_at_idx' });
     await collection.createIndex({ 'searchableFields.tags': 1 }, { name: 'searchable_tags_idx' });
     await collection.createIndex(
       {
@@ -172,22 +147,6 @@ class DatabaseConfig {
   }
 
   /**
-   * Create indexes for metadata collection
-   */
-  async createMetadataIndexes() {
-    const collection = this.getCollection('metadata');
-
-    await this.dropCollectionIndexes(collection, 'metadata');
-
-    await collection.createIndex({ title: 1 }, { name: 'title_idx' });
-    await collection.createIndex({ version: 1 }, { name: 'version_idx' });
-    await collection.createIndex({ protocol: 1 }, { name: 'protocol_idx' });
-    await collection.createIndex({ createdAt: 1 }, { name: 'created_at_idx' });
-    await collection.createIndex({ updatedAt: 1 }, { name: 'updated_at_idx' });
-    await collection.createIndex({ description: 'text' }, { name: 'description_text_idx' });
-  }
-
-  /**
    * Create indexes for original documents collection
    */
   async createOriginalIndexes() {
@@ -195,7 +154,6 @@ class DatabaseConfig {
 
     await this.dropCollectionIndexes(collection, 'original');
 
-    await collection.createIndex({ metadataId: 1 }, { name: 'metadata_id_idx' });
     await collection.createIndex({ normalizedId: 1 }, { name: 'normalized_id_idx' });
     await collection.createIndex({ createdAt: 1 }, { name: 'created_at_idx' });
   }

@@ -104,18 +104,16 @@ class DatabaseSetup {
         const processed = await this.asyncapiProcessor.processAsyncAPIFile(filePath, 'json');
         const importTimestamp = new Date();
 
-        const metadata = {
-          ...processed.metadata,
-          sourceFile: file,
-          sourceFormat: extension,
-          importPath: path.relative(process.cwd(), filePath),
-          importedAt: importTimestamp,
-          convertedFormat: 'json'
-        };
-
         const normalizedDocument = {
           ...processed.normalized,
-          metadata,
+          summary: {
+            ...processed.summary,
+            sourceFile: file,
+            sourceFormat: extension,
+            importPath: path.relative(process.cwd(), filePath),
+            importedAt: importTimestamp,
+            convertedFormat: 'json'
+          },
           searchableFields: processed.searchableFields,
           source: {
             filename: file,
@@ -130,18 +128,19 @@ class DatabaseSetup {
         };
 
         const originalDocument = {
+          raw: processed.original,
+          converted: processed.converted,
           filename: file,
           relativePath: path.relative(process.cwd(), filePath),
           format: extension,
-          content: processed.original,
-          converted: processed.converted,
           importedAt: importTimestamp
         };
 
         await this.mongoService.insertAsyncAPIDocument({
           original: originalDocument,
           normalized: normalizedDocument,
-          metadata
+          summary: normalizedDocument.summary,
+          searchableFields: normalizedDocument.searchableFields
         });
 
         summary.inserted += 1;
@@ -164,17 +163,14 @@ class DatabaseSetup {
 
       await this.mongoService.connect();
       const normalizedCollection = this.mongoService.getCollection('normalized');
-      const metadataCollection = this.mongoService.getCollection('metadata');
       const originalCollection = this.mongoService.getCollection('original');
 
-      const [normalizedResult, metadataResult, originalResult] = await Promise.all([
+      const [normalizedResult, originalResult] = await Promise.all([
         normalizedCollection.deleteMany({}),
-        metadataCollection.deleteMany({}),
         originalCollection.deleteMany({})
       ]);
 
       console.log(`🗑️ Deleted ${normalizedResult.deletedCount} normalized documents`);
-      console.log(`🗑️ Deleted ${metadataResult.deletedCount} metadata documents`);
       console.log(`🗑️ Deleted ${originalResult.deletedCount} original documents`);
 
       console.log('✅ Database cleaned successfully!');
@@ -195,17 +191,14 @@ class DatabaseSetup {
 
       await this.mongoService.connect();
       const normalizedCollection = this.mongoService.getCollection('normalized');
-      const metadataCollection = this.mongoService.getCollection('metadata');
       const originalCollection = this.mongoService.getCollection('original');
 
-      const [normalizedCount, metadataCount, originalCount] = await Promise.all([
+      const [normalizedCount, originalCount] = await Promise.all([
         normalizedCollection.countDocuments(),
-        metadataCollection.countDocuments(),
         originalCollection.countDocuments()
       ]);
 
       console.log(`📈 Normalized documents: ${normalizedCount}`);
-      console.log(`📈 Metadata documents: ${metadataCount}`);
       console.log(`📈 Original documents: ${originalCount}`);
 
       if (normalizedCount > 0) {
