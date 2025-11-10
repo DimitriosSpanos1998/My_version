@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 require('dotenv').config();
+const { ObjectId } = require('mongodb');
 const MongoService = require('../src/services/mongo-service');
 
 class DatabaseCleaner {
@@ -76,7 +77,8 @@ class DatabaseCleaner {
       const cutoffDate = new Date();
       cutoffDate.setDate(cutoffDate.getDate() - days);
 
-      const normalizedFilter = { 'summary.createdAt': { $lt: cutoffDate } };
+      const cutoffId = ObjectId.createFromTime(Math.floor(cutoffDate.getTime() / 1000));
+      const normalizedFilter = { _id: { $lt: cutoffId } };
 
       const normalizedBefore = await normalizedCollection.countDocuments(normalizedFilter);
       console.log(`📊 Normalized docs older than ${days} days: ${normalizedBefore}`);
