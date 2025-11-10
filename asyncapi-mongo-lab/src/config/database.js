@@ -18,7 +18,9 @@ class DatabaseConfig {
       normalized:
         process.env.NORMALIZED_COLLECTION_NAME ||
         process.env.COLLECTION_NAME ||
-        'asyncapi_normalized'
+        'asyncapi_normalized',
+      // 👇 ΝΕΟ: συλλογή metadata
+      metada: process.env.METADA_COLLECTION_NAME || 'asyncapi_metada'
     };
   }
 
@@ -29,11 +31,7 @@ class DatabaseConfig {
    */
   getCollectionName(collectionTypeOrName = 'normalized') {
     const names = this.getCollectionNames();
-
-    if (!collectionTypeOrName) {
-      return names.normalized;
-    }
-
+    if (!collectionTypeOrName) return names.normalized;
     return names[collectionTypeOrName] || collectionTypeOrName;
   }
 
@@ -43,9 +41,7 @@ class DatabaseConfig {
    */
   async connect() {
     try {
-      if (this.isConnected && this.db) {
-        return this.db;
-      }
+      if (this.isConnected && this.db) return this.db;
 
       const uri = process.env.MONGODB_URI || 'mongodb://localhost:27017/asyncapi-lab';
       const dbName = process.env.DB_NAME || 'asyncapi-lab';
@@ -78,7 +74,7 @@ class DatabaseConfig {
 
   /**
    * Get collection instance
-   * @param {string} collectionName - Name of the collection
+   * @param {string} collectionTypeOrName - Logical type or explicit collection name
    * @returns {Object} Collection instance
    */
   getCollection(collectionTypeOrName = 'normalized') {
@@ -110,12 +106,12 @@ class DatabaseConfig {
 
   /**
    * Create indexes for better performance
-   * @param {string} collectionName - Name of the collection
    */
   async createIndexes() {
     try {
       await this.createNormalizedIndexes();
       await this.createOriginalIndexes();
+      await this.createMetadaIndexes(); // 👈 ΝΕΟ
       console.log('📊 Database indexes created successfully');
     } catch (error) {
       console.error('❌ Error creating indexes:', error.message);
@@ -156,6 +152,23 @@ class DatabaseConfig {
 
     await collection.createIndex({ normalizedId: 1 }, { name: 'normalized_id_idx' });
     await collection.createIndex({ createdAt: 1 }, { name: 'created_at_idx' });
+  }
+
+  /**
+   * Create indexes for metada collection
+   */
+  async createMetadaIndexes() {
+    const collection = this.getCollection('metada');
+
+    await this.dropCollectionIndexes(collection, 'metada');
+
+    await collection.createIndex({ title: 1 }, { name: 'title_idx' });
+    await collection.createIndex({ version: 1 }, { name: 'version_idx' });
+    await collection.createIndex({ protocol: 1 }, { name: 'protocol_idx' });
+    await collection.createIndex({ createdAt: 1 }, { name: 'created_at_idx' });
+    await collection.createIndex({ tags: 1 }, { name: 'tags_idx' });
+    await collection.createIndex({ originalId: 1 }, { name: 'original_id_idx' });
+    await collection.createIndex({ normalizedId: 1 }, { name: 'normalized_id_idx' });
   }
 
   /**
