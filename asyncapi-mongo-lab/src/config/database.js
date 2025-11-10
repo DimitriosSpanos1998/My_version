@@ -134,8 +134,6 @@ class DatabaseConfig {
     await collection.createIndex({ 'summary.title': 1 }, { name: 'summary_title_idx' });
     await collection.createIndex({ 'summary.version': 1 }, { name: 'summary_version_idx' });
     await collection.createIndex({ 'summary.protocol': 1 }, { name: 'summary_protocol_idx' });
-    await collection.createIndex({ 'summary.createdAt': 1 }, { name: 'summary_created_at_idx' });
-    await collection.createIndex({ 'summary.updatedAt': 1 }, { name: 'summary_updated_at_idx' });
     await collection.createIndex({ 'searchableFields.tags': 1 }, { name: 'searchable_tags_idx' });
     await collection.createIndex(
       {
@@ -155,7 +153,6 @@ class DatabaseConfig {
     await this.dropCollectionIndexes(collection, 'original');
 
     await collection.createIndex({ normalizedId: 1 }, { name: 'normalized_id_idx' });
-    await collection.createIndex({ createdAt: 1 }, { name: 'created_at_idx' });
   }
 
   /**

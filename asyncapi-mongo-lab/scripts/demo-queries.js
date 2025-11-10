@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 require('dotenv').config();
+const { ObjectId } = require('mongodb');
 const MongoService = require('../src/services/mongo-service');
 
 class DemoQueries {
@@ -100,8 +101,9 @@ class DemoQueries {
     console.log('\n3. Recent documents (last 24 hours):');
     const yesterday = new Date();
     yesterday.setDate(yesterday.getDate() - 1);
+    const thresholdId = ObjectId.createFromTime(Math.floor(yesterday.getTime() / 1000));
     const recentDocs = await this.mongoService.findAsyncAPIDocuments({
-      'summary.createdAt': { $gte: yesterday }
+      _id: { $gte: thresholdId }
     });
     console.log(`   Found ${recentDocs.length} documents created in last 24 hours`);
 
@@ -111,14 +113,16 @@ class DemoQueries {
     });
     console.log(`   Found ${taggedDocs.length} documents with specific tags`);
 
-    console.log('\n5. Documents sorted by creation date:');
+    console.log('\n5. Documents sorted by creation time:');
     const sortedDocs = await this.mongoService.findAsyncAPIDocuments(
       {},
-      { sort: { 'summary.createdAt': -1 }, limit: 3 }
+      { sort: { _id: -1 }, limit: 3 }
     );
     console.log('   Most recent documents:');
     sortedDocs.forEach((doc, index) => {
-      console.log(`     ${index + 1}. ${doc.summary.title} (${doc.summary.createdAt.toISOString()})`);
+      const createdAt = doc._id instanceof ObjectId ? doc._id.getTimestamp() : null;
+      const timestamp = createdAt ? ` (${createdAt.toISOString()})` : '';
+      console.log(`     ${index + 1}. ${doc.summary.title}${timestamp}`);
     });
   }
 
@@ -209,9 +213,9 @@ class DemoQueries {
       {
         $group: {
           _id: {
-            year: { $year: '$summary.createdAt' },
-            month: { $month: '$summary.createdAt' },
-            day: { $dayOfMonth: '$summary.createdAt' }
+            year: { $year: { $toDate: '$_id' } },
+            month: { $month: { $toDate: '$_id' } },
+            day: { $dayOfMonth: { $toDate: '$_id' } }
           },
           count: { $sum: 1 },
           protocols: { $addToSet: '$summary.protocol' }

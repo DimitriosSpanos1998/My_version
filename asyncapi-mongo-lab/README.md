@@ -120,7 +120,7 @@ LOG_LEVEL=info
 
 The lab uses three MongoDB collections to separate different representations of each AsyncAPI document:
 
-- **Normalized** (`NORMALIZED_COLLECTION_NAME`): Stores the converted AsyncAPI 3.0.0 specification along with quick summary fields for searching.
+- **Normalized** (`NORMALIZED_COLLECTION_NAME`): Stores the converted AsyncAPI 3.0.0 specification (nested under `normalized`) along with quick summary fields for searching.
 - **Original** (`ORIGINAL_COLLECTION_NAME`): Stores the raw AsyncAPI source content for auditing or re-processing purposes.
 
 Each insert operation automatically writes to both collections. The normalized document keeps lightweight summary information so most
@@ -247,9 +247,11 @@ const complexDocs = await mongoService.findAsyncAPIDocuments({
   'summary.serversCount': { $gte: 1 }
 });
 
-// Date range
+// Date range using ObjectId timestamps
+const { ObjectId } = require('mongodb');
+const cutoff = ObjectId.createFromTime(Math.floor(Date.now() / 1000) - 86400);
 const recentDocs = await mongoService.findAsyncAPIDocuments({
-  'summary.createdAt': { $gte: new Date('2023-01-01') }
+  _id: { $gte: cutoff }
 });
 ```
 
