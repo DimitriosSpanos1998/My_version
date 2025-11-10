@@ -2,414 +2,195 @@ const fs = require('fs-extra');
 const { Parser } = require('@asyncapi/parser');
 const { convert } = require('@asyncapi/converter');
 const yaml = require('yaml');
-const { randomUUID } = require('node:crypto');
 
-function ensureArray(value) {
-  if (Array.isArray(value)) return value;
-  if (value == null) return [];
-  return [value];
-}
+// --- Small helpers ---------------------------------------------------------
+const ensureArray = (v) => (Array.isArray(v) ? v : v == null ? [] : [v]);
+const lc = (s) => (typeof s === 'string' ? s.toLowerCase() : '');
 
-function tagNames(tags) {
-  return ensureArray(tags)
-    .map(tag => tag?.name ?? tag)
-    .filter(Boolean);
-}
-
-function extractOperations(asyncapi, channel) {
-  const operations = [];
-
-  if (Array.isArray(channel?.operations)) {
-    for (const op of channel.operations) operations.push(op);
-  } else if (channel?.operations && typeof channel.operations === 'object') {
-    for (const [action, op] of Object.entries(channel.operations)) {
-      operations.push({ action, ...op });
-    }
-  }
-
-  ['publish', 'subscribe'].forEach(action => {
-    if (channel?.[action]) operations.push({ action, ...channel[action] });
-  });
-
-  return operations.map(op => {
-    const action = op.action ?? op.type ?? 'publish';
-    const rawMessages = Array.isArray(op.messages)
-      ? op.messages
-      : op.message != null
-        ? Array.isArray(op.message)
-          ? op.message
-          : [op.message]
-        : [];
-
-    const messages = rawMessages.map(message => ({
-      name: message?.name,
-      title: message?.title,
-      summary: message?.summary,
-      contentType: message?.contentType ?? asyncapi?.defaultContentType,
-      schemaFormat: message?.schemaFormat,
-      correlationId: message?.correlationId?.location ?? message?.correlationId,
-      bindings: message?.bindings ?? {},
-      examples: message?.examples ?? [],
-      payloadSchema: message?.payload,
-      headersSchema: message?.headers
-    }));
-
-    return {
-      action,
-      operationId: op?.operationId,
-      summary: op?.summary,
-      description: op?.description,
-      tags: tagNames(op?.tags),
-      security: ensureArray(op?.security).map(entry =>
-        typeof entry === 'object' ? Object.keys(entry)[0] : entry
-      ),
-      bindings: op?.bindings ?? {},
-      messages
-    };
-  });
-}
-
-function buildSummaryStructure(asyncapi, serviceId) {
-  const info = asyncapi?.info ?? {};
-
-  const service = {
-    id: serviceId ?? randomUUID(),
-    title: info.title,
-    version: info.version,
-    defaultContentType: asyncapi.defaultContentType,
-    description: info.description,
-    tags: tagNames(asyncapi.tags ?? info.tags)
-  };
-
-  const servers = Object.entries(asyncapi.servers ?? {}).map(([name, server]) => ({
-    name,
-    url: server.url,
-    protocol: server.protocol,
-    protocolVersion: server.protocolVersion,
-    description: server.description,
-    security: ensureArray(server.security).map(entry =>
-      typeof entry === 'object' ? Object.keys(entry)[0] : entry
-    ),
-    bindings: server.bindings ?? {},
-    variables: Object.entries(server.variables ?? {}).map(([varName, variable]) => ({
-      name: varName,
-      default: variable?.default,
-      enum: variable?.enum ?? [],
-      description: variable?.description
-    }))
-  }));
-
-  const channels = Object.entries(asyncapi.channels ?? {}).map(([name, channel]) => ({
-    name,
-    description: channel?.description,
-    parameters: Object.keys(channel?.parameters ?? {}),
-    bindings: channel?.bindings ?? {},
-    operations: extractOperations(asyncapi, channel)
-  }));
-
-  const securities = Object.entries(asyncapi?.components?.securitySchemes ?? {}).map(([name, scheme]) => {
-    const entry = { name, type: scheme.type };
-
-    ['in', 'scheme', 'bearerFormat', 'openIdConnectUrl'].forEach(key => {
-      if (scheme[key]) {
-        entry[key] = scheme[key];
-      }
-    });
-
-    if (scheme.type === 'oauth2') {
-      entry.flows = Object.fromEntries(
-        Object.entries(scheme.flows ?? {}).map(([flowName, flow]) => [
-          flowName,
-          {
-            authorizationUrl: flow.authorizationUrl,
-            tokenUrl: flow.tokenUrl,
-            refreshUrl: flow.refreshUrl,
-            scopes: Object.keys(flow.scopes ?? {})
-          }
-        ])
-      );
-    }
-
-    return entry;
-  });
-
-  return { service, servers, channels, securities };
-}
-
+// --- Core class ------------------------------------------------------------
 class AsyncAPIProcessor {
   constructor() {
     this.supportedFormats = ['yaml', 'json', 'yml'];
   }
 
-  /**
-   * Load AsyncAPI file from filesystem
-   * @param {string} filePath - Path to the AsyncAPI file
-   * @returns {Promise<string>} File content as string
-   */
+  /** Load file from disk as UTF-8 string */
+  async load(filePath) {
+    if (!(await fs.pathExists(filePath))) {
+      throw new Error(`File not found: ${filePath}`);
+    }
+    const content = await fs.readFile(filePath, 'utf8');
+    console.log(`📄 Loaded AsyncAPI file: ${filePath}`);
+    return content;
+  }
+
+  /** Alias maintained for backwards compatibility */
   async loadAsyncAPIFile(filePath) {
-    try {
-      if (!await fs.pathExists(filePath)) {
-        throw new Error(`File not found: ${filePath}`);
-      }
+    return this.load(filePath);
+  }
 
-      const content = await fs.readFile(filePath, 'utf8');
-      console.log(`📄 Loaded AsyncAPI file: ${filePath}`);
-      return content;
+  /** Parse AsyncAPI content (YAML or JSON) into plain JSON object */
+  async parse(content) {
+    try {
+      const parser = new Parser();
+      const { document, diagnostics } = await parser.parse(content);
+      if (diagnostics?.length) {
+        console.warn('⚠️ AsyncAPI diagnostics:', diagnostics.map((d) => d.message));
+      }
+      console.log('✅ AsyncAPI parsed successfully');
+      return document.json();
     } catch (error) {
-      console.error(`❌ Error loading file ${filePath}:`, error.message);
+      console.error('❌ Error parsing AsyncAPI:', error.message);
       throw error;
     }
   }
 
-  /**
-   * Parse AsyncAPI specification
-   * @param {string} content - AsyncAPI content as string
-   * @returns {Promise<Object>} Parsed AsyncAPI object
-   */
- // 1) parse ως string και κράτα το parsed.document
-async parseAsyncAPI(content, filePath) {
-  try {
-    const parser = new Parser();
-    // Δώσε string απευθείας (JSON ή YAML)
-    const { document, diagnostics } = await parser.parse(content);
-    if (diagnostics?.length) {
-      console.warn('Parser diagnostics:', diagnostics);
-    }
-    console.log('✅ AsyncAPI specification parsed successfully');
-    // Πάρε το "raw" object αν το χρειάζεσαι:
-    const plain = document.json(); // ή document.yaml() αν σε βολεύει κείμενο
-    return plain; // επιστρέφει καθαρό JSON object της spec
-  } catch (error) {
-    console.error('❌ Error parsing AsyncAPI:', error.message);
-    throw error;
-  }
-}
-  /**
-   * Convert AsyncAPI to different format
-   Basically, 'convert' means stringifying the JSON or converting to YAML
-   * @param {Object} asyncAPISpec - Parsed AsyncAPI object (already JSON)
-   * @param {string} targetFormat - Target format ('json', 'yaml')
-   * @returns {string} Converted AsyncAPI as string
-   */
-async convertAsyncAPI(originalContent, parsedSpec, targetFormat = 'json') {
-  try {
-    if (!['json', 'yaml'].includes(targetFormat)) {
-      throw new Error(`Unsupported format: ${targetFormat}`);
-    }
-
-    const targetVersion = '3.0.0';
-    const currentVersion = parsedSpec?.asyncapi || parsedSpec?.version;
-
-    let convertedObject = parsedSpec;
-    let wasConverted = false;
-
-    // 1) ΜΟΝΟ αν δεν είναι ήδη v3
-    if (typeof currentVersion !== 'string' || !currentVersion.startsWith('3.')) {
-      const sourceString = typeof originalContent === 'string'
-        ? originalContent
-        : JSON.stringify(originalContent, null, 2);
-
-      const result = await convert(sourceString, targetVersion);
-      // ---- Robust normalization of converter output ----
-      let maybeText = null;
-      let maybeObj = null;
-
-      if (typeof result === 'string') {
-        maybeText = result;
-      } else if (result && typeof result === 'object') {
-        // κοινοί πιθανοί τρόποι που γυρνάει ο converter
-        if (typeof result.converted === 'string') {
-          maybeText = result.converted;
-        } else if (typeof result.document === 'string') {
-          maybeText = result.document;
-        } else if (result.document && typeof result.document === 'object') {
-          maybeObj = result.document;
-        } else if (result.content && typeof result.content === 'string') {
-          maybeText = result.content;
-        } else {
-          // last resort: αν είναι ήδη JSON object, χρησιμοποίησέ το
-          maybeObj = result;
-        }
-      }
-
-      if (maybeText != null) {
-        convertedObject = maybeText.trim().startsWith('{')
-          ? JSON.parse(maybeText)
-          : yaml.parse(maybeText);
-      } else if (maybeObj != null) {
-        convertedObject = maybeObj; // ήδη object
-      } else {
-        throw new Error('Unexpected converter output type');
-      }
-
-      wasConverted = true;
-    }
-
-    const outText = targetFormat === 'yaml'
-      ? yaml.stringify(convertedObject)
-      : JSON.stringify(convertedObject, null, 2);
-
-    const resultingVersion = convertedObject?.asyncapi || convertedObject?.version || '3.0.0';
-    return { content: outText, document: convertedObject, version: resultingVersion, wasConverted };
-  } catch (error) {
-    console.error('❌ Error converting AsyncAPI specification:', error.message);
-    throw error;
-  }
-}
-
-  /**
-   * Normalize AsyncAPI data for MongoDB storage
-   * @param {Object} asyncAPISpec - Parsed AsyncAPI object
-   * @returns {Object} Normalized AsyncAPI specification
-   */
-  normalizeAsyncAPIData(asyncAPISpec) {
-    try {
-      const normalized = JSON.parse(JSON.stringify(asyncAPISpec));
-
-      console.log('🔧 AsyncAPI data normalized (raw JSON preserved)');
-      return normalized;
-    } catch (error) {
-      console.error('❌ Error normalizing AsyncAPI data:', error.message);
-      throw error;
-    }
+  async parseAsyncAPI(content) {
+    return this.parse(content);
   }
 
-  buildSummary(asyncAPISpec) {
-    try {
-      const structure = buildSummaryStructure(asyncAPISpec);
-      const now = new Date();
+  /** Minimal validation for required info */
+  validate(spec) {
+    const errors = [];
+    if (!spec.info) errors.push('Missing: info');
+    if (!spec.info?.title) errors.push('Missing: info.title');
+    if (!spec.info?.version) errors.push('Missing: info.version');
 
-      const primaryProtocol =
-        structure.servers.find(server => server.protocol)?.protocol || 'unknown';
-
-      const summary = {
-        ...structure,
-        title: structure.service.title || 'Untitled API',
-        version: structure.service.version || '1.0.0',
-        description: structure.service.description || '',
-        protocol: primaryProtocol || 'unknown',
-        protocols: structure.servers.map(server => server.protocol).filter(Boolean),
-        channelsCount: structure.channels.length,
-        serversCount: structure.servers.length,
-        tags: structure.service.tags || [],
-        defaultContentType: structure.service.defaultContentType,
-        createdAt: now,
-        updatedAt: now,
-        processedAt: now
-      };
-
-      return summary;
-    } catch (error) {
-      console.error('❌ Error building summary information:', error.message);
-      throw error;
-    }
+    const result = { isValid: errors.length === 0, errors, warnings: [] };
+    console.log(`✅ Validation ${result.isValid ? 'passed' : 'failed'}`);
+    return result;
   }
 
-  buildSearchableFields(summary = {}) {
-    const service = summary.service || {};
-    const tags = summary.tags || service.tags || [];
-
-    const protocol = (summary.protocol || '').toString().toLowerCase();
-
-    return {
-      title: (summary.title || service.title || '').toString().toLowerCase(),
-      description: (summary.description || service.description || '').toString().toLowerCase(),
-      version: summary.version || service.version || '',
-      protocol,
-      tags: ensureArray(tags)
-        .map(tag => tag.toString().toLowerCase())
-        .filter(Boolean)
-    };
-  }
-
-  /**
-   * Validate AsyncAPI specification
-   * @param {Object} asyncAPISpec - Parsed AsyncAPI object
-   * @returns {Object} Validation result
-   */
   validateAsyncAPI(asyncAPISpec) {
-    const validation = {
-      isValid: true,
-      errors: [],
-      warnings: []
-    };
+    const validation = this.validate(asyncAPISpec);
 
-    // Check required fields
-    if (!asyncAPISpec.info) {
-      validation.errors.push('Missing required field: info');
-      validation.isValid = false;
-    }
-
-    if (!asyncAPISpec.info?.title) {
-      validation.errors.push('Missing required field: info.title');
-      validation.isValid = false;
-    }
-
-    if (!asyncAPISpec.info?.version) {
-      validation.errors.push('Missing required field: info.version');
-      validation.isValid = false;
-    }
-
-    // Check for channels
     if (!asyncAPISpec.channels || Object.keys(asyncAPISpec.channels).length === 0) {
       validation.warnings.push('No channels defined');
     }
 
-    // Check for servers
     if (!asyncAPISpec.servers || Object.keys(asyncAPISpec.servers).length === 0) {
       validation.warnings.push('No servers defined');
     }
 
-    console.log(`✅ AsyncAPI validation completed. Valid: ${validation.isValid}`);
     return validation;
   }
 
-  /**
-   * Process AsyncAPI file end-to-end
-   * @param {string} filePath - Path to AsyncAPI file
-   * @param {string} targetFormat - Target format for conversion
-   * @returns {Promise<Object>} Processed AsyncAPI data
-   */
-  async processAsyncAPIFile(filePath, targetFormat = 'json') {
+  /** Convert to v3 (only if needed) and stringify to target format */
+  async convert(originalContent, spec, targetFormat = 'json') {
+    console.log('🔄 Starting conversion to target format');
+    if (!['json', 'yaml'].includes(targetFormat)) {
+      throw new Error(`Unsupported format: ${targetFormat}`);
+    }
+
+    const wantYaml = targetFormat === 'yaml';
+    const isV3 = typeof spec?.asyncapi === 'string' && spec.asyncapi.startsWith('3.');
+
+    let document = spec;
+    let wasConverted = false;
+
+    if (!isV3) {
+      console.log('⚙️ Converting AsyncAPI spec to 3.0.0');
+      const src = typeof originalContent === 'string' ? originalContent : JSON.stringify(originalContent, null, 2);
+      const out = await convert(src, '3.0.0');
+
+      if (typeof out === 'string') {
+        document = out.trim().startsWith('{') ? JSON.parse(out) : yaml.parse(out);
+      } else if (out?.document && typeof out.document === 'object') {
+        document = out.document;
+      } else if (out?.document && typeof out.document === 'string') {
+        document = out.document.trim().startsWith('{') ? JSON.parse(out.document) : yaml.parse(out.document);
+      } else if (out?.converted) {
+        document = out.converted.trim().startsWith('{') ? JSON.parse(out.converted) : yaml.parse(out.converted);
+      } else {
+        document = out;
+      }
+      wasConverted = true;
+    }
+
+    const content = wantYaml ? yaml.stringify(document) : JSON.stringify(document, null, 2);
+    const version = document?.asyncapi || '3.0.0';
+
+    console.log(`✅ Conversion completed. Version: ${version}, Converted: ${wasConverted}`);
+    return { content, document, version, wasConverted };
+  }
+
+  async convertAsyncAPI(originalContent, parsedSpec, targetFormat = 'json') {
+    return this.convert(originalContent, parsedSpec, targetFormat);
+  }
+
+  /** Pass-through normalization (keeps raw spec structure) */
+  normalize(spec) {
+    console.log('🔧 Normalizing AsyncAPI data');
+    return JSON.parse(JSON.stringify(spec));
+  }
+
+  normalizeAsyncAPIData(asyncAPISpec) {
+    return this.normalize(asyncAPISpec);
+  }
+
+  /** Small, useful summary for lists/search */
+  buildSummary(spec) {
+    const info = spec.info || {};
+    const servers = Object.values(spec.servers || {});
+    const channels = Object.values(spec.channels || {});
+    const protocols = Array.from(new Set(servers.map((s) => s.protocol).filter(Boolean)));
+
+    const summary = {
+      title: info.title || 'Untitled API',
+      version: info.version || '',
+      description: info.description || '',
+      protocol: protocols[0] || 'unknown',
+      protocols,
+      channelsCount: channels.length,
+      serversCount: servers.length,
+      tags: ensureArray(spec.tags || info.tags).map((t) => (t?.name ?? t)).filter(Boolean),
+      defaultContentType: spec.defaultContentType,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      processedAt: new Date()
+    };
+
+    console.log('📊 Summary built successfully');
+    return summary;
+  }
+
+  /** Lowercased fields used for text search */
+  buildSearchableFields(summary = {}) {
+    console.log('🔍 Building searchable fields');
+    return {
+      title: lc(summary.title),
+      description: lc(summary.description),
+      version: summary.version || '',
+      protocol: lc(summary.protocol || ''),
+      tags: ensureArray(summary.tags).map((t) => lc(String(t)))
+    };
+  }
+
+  /** End-to-end helper: load → parse → validate → convert → normalize → summarize */
+  async process(filePath, targetFormat = 'json') {
     try {
       console.log(`🚀 Starting AsyncAPI processing for: ${filePath}`);
-      
-      // Load file
-      const content = await this.loadAsyncAPIFile(filePath);
-      
-      // Parse AsyncAPI
-      const parsed = await this.parseAsyncAPI(content, filePath);
-      
-      // Validate
+      const original = await this.load(filePath);
+      const parsed = await this.parse(original);
       const validation = this.validateAsyncAPI(parsed);
       if (!validation.isValid) {
         throw new Error(`Validation failed: ${validation.errors.join(', ')}`);
       }
-      
-      // Convert format
-      const conversion = await this.convertAsyncAPI(content, parsed, targetFormat);
 
-      // Normalize for MongoDB
-      const normalized = this.normalizeAsyncAPIData(conversion.document);
-
+      const conversion = await this.convert(original, parsed, targetFormat);
+      const normalized = this.normalize(conversion.document);
       const summary = this.buildSummary(conversion.document);
       const searchableFields = this.buildSearchableFields(summary);
 
       console.log('✅ AsyncAPI processing completed successfully');
-
-      return {
-        original: content,
-        parsed: parsed,
-        converted: conversion.content,
-        normalized: normalized,
-        summary,
-        searchableFields,
-        validation: validation
-      };
+      return { original, parsed, converted: conversion.content, normalized, summary, searchableFields, validation };
     } catch (error) {
       console.error('❌ AsyncAPI processing failed:', error.message);
       throw error;
     }
+  }
+
+  async processAsyncAPIFile(filePath, targetFormat = 'json') {
+    return this.process(filePath, targetFormat);
   }
 }
 
