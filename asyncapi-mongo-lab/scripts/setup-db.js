@@ -94,24 +94,53 @@ class DatabaseSetup {
       const progressLabel = `${index + 1}/${files.length}`;
 
       try {
-        const processed = await this.asyncapiProcessor.processAsyncAPIFile(filePath, 'json');
-
-        const alreadyImported = await normalizedCollection.findOne({
-          'summary.title': processed.summary.title,
-          'summary.version': processed.summary.version,
-          'summary.protocol': processed.summary.protocol
-        });
+        const alreadyImported = await normalizedCollection.findOne({ 'source.filename': file });
         if (alreadyImported) {
           summary.skipped += 1;
           console.log(`${progressLabel} ↩️  Skipping already imported example: ${file}`);
           continue;
         }
 
+        const processed = await this.asyncapiProcessor.processAsyncAPIFile(filePath, 'json');
+        const importTimestamp = new Date();
+
+        const normalizedDocument = {
+          ...processed.normalized,
+          summary: {
+            ...processed.summary,
+            sourceFile: file,
+            sourceFormat: extension,
+            importPath: path.relative(process.cwd(), filePath),
+            importedAt: importTimestamp,
+            convertedFormat: 'json'
+          },
+          searchableFields: processed.searchableFields,
+          source: {
+            filename: file,
+            relativePath: path.relative(process.cwd(), filePath),
+            format: extension,
+            importedAt: importTimestamp
+          },
+          conversion: {
+            targetFormat: 'json',
+            convertedAt: importTimestamp
+          }
+        };
+
+        const originalDocument = {
+          raw: processed.original,
+          converted: processed.converted,
+          filename: file,
+          relativePath: path.relative(process.cwd(), filePath),
+          format: extension,
+          importedAt: importTimestamp
+        };
+
         await this.mongoService.insertAsyncAPIDocument({
-          original: processed.original,
-          normalized: processed.normalized,
-          summary: processed.summary,
-          searchableFields: processed.searchableFields
+          original: originalDocument,
+          normalized: normalizedDocument,
+          summary: normalizedDocument.summary,
+          searchableFields: normalizedDocument.searchableFields
         });
 
         summary.inserted += 1;

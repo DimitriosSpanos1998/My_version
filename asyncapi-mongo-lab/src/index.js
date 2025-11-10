@@ -159,6 +159,7 @@ class AsyncAPIMongoLab {
         console.log(`   v${version._id}: ${version.count} document(s)`);
       });
 
+      console.log(`\n🕒 Last Updated: ${stats.lastUpdated.toISOString()}`);
     } catch (error) {
       console.error('❌ Error getting statistics:', error.message);
     }
@@ -178,6 +179,15 @@ class AsyncAPIMongoLab {
         'summary.channelsCount': { $gt: 2 }
       });
       console.log(`   Found ${complexQuery.length} documents with more than 2 channels`);
+
+      // Find documents created today
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      console.log('\n🔍 Finding documents created today...');
+      const todayDocs = await this.mongoService.findAsyncAPIDocuments({
+        'summary.createdAt': { $gte: today }
+      });
+      console.log(`   Found ${todayDocs.length} documents created today`);
 
       // Aggregate operations
       console.log('\n📊 Aggregating data...');
