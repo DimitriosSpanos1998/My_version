@@ -24,16 +24,12 @@ class MongoService {
     return this.getCollection('normalized');
   }
 
-  getMetadataCollection() {
-    return this.getCollection('metadata');
-  }
-
   getOriginalCollection() {
     return this.getCollection('original');
   }
 
   /**
-   * Prepare normalized, metadata, and original content for insertion
+   * Prepare normalized, summary, and original content for insertion
    * @param {Object} asyncAPIData - AsyncAPI data payload
    * @returns {Object} Prepared document parts
    */
@@ -50,15 +46,19 @@ class MongoService {
       delete normalizedData._id;
     }
 
-    const metadataData = asyncAPIData.metadata
-      ? { ...asyncAPIData.metadata }
-      : normalizedData.metadata
-        ? { ...normalizedData.metadata }
-        : {};
+    const summary = this.ensureSummary(
+      asyncAPIData.summary ?? normalizedData.summary ?? {},
+      normalizedData
+    );
 
-    if (normalizedData.metadata) {
-      delete normalizedData.metadata;
-    }
+    const searchableFields = asyncAPIData.searchableFields
+      ? { ...asyncAPIData.searchableFields }
+      : normalizedData.searchableFields
+        ? { ...normalizedData.searchableFields }
+        : this.buildSearchableFieldsFromSummary(summary);
+
+    normalizedData.summary = summary;
+    normalizedData.searchableFields = searchableFields;
 
     const originalContent = this.prepareOriginalContent(
       asyncAPIData.original ??
@@ -67,65 +67,83 @@ class MongoService {
       null
     );
 
-    const searchableFields = asyncAPIData.searchableFields
-      ? { ...asyncAPIData.searchableFields }
-      : normalizedData.searchableFields
-        ? { ...normalizedData.searchableFields }
-        : this.buildSearchableFields(metadataData);
-
-    if (searchableFields) {
-      normalizedData.searchableFields = searchableFields;
-    }
-
     return {
       normalized: normalizedData,
-      metadata: metadataData,
+      summary,
+      searchableFields,
       original: originalContent
     };
   }
 
-  /**
-   * Ensure metadata document has required timestamps
-   * @param {Object} metadata - Metadata object
-   * @returns {Object} Sanitized metadata
-   */
-  sanitizeMetadata(metadata = {}) {
-    const sanitized = { ...metadata };
+  ensureSummary(summary = {}, normalizedData = {}) {
+    const cloned = { ...summary };
     const now = new Date();
 
-    const createdAt = metadata.createdAt ? new Date(metadata.createdAt) : new Date(now);
-    const updatedAt = metadata.updatedAt ? new Date(metadata.updatedAt) : new Date(createdAt);
-    const processedAt = metadata.processedAt ? new Date(metadata.processedAt) : new Date(updatedAt);
-
-    sanitized.createdAt = createdAt;
-    sanitized.updatedAt = updatedAt;
-    sanitized.processedAt = processedAt;
-
-    return sanitized;
-  }
-
-  buildSearchableFields(metadata = {}) {
-    if (!metadata || typeof metadata !== 'object') {
-      return undefined;
+    if (!cloned.title && normalizedData?.info?.title) {
+      cloned.title = normalizedData.info.title;
     }
 
-    const service = metadata.service || {};
-    const tagsSource = metadata.tags || service.tags || [];
+    if (!cloned.version && normalizedData?.info?.version) {
+      cloned.version = normalizedData.info.version;
+    }
 
+    if (!cloned.description && normalizedData?.info?.description) {
+      cloned.description = normalizedData.info.description;
+    }
+
+    if (!cloned.protocol) {
+      const firstProtocol = Object.values(normalizedData?.servers ?? {})
+        .map(server => server?.protocol)
+        .find(Boolean);
+      cloned.protocol = firstProtocol || 'unknown';
+    }
+
+    const channelsCount = Array.isArray(normalizedData?.channels)
+      ? normalizedData.channels.length
+      : normalizedData?.channels
+        ? Object.keys(normalizedData.channels).length
+        : 0;
+    if (cloned.channelsCount == null) {
+      cloned.channelsCount = channelsCount;
+    }
+
+    const serversCount = Array.isArray(normalizedData?.servers)
+      ? normalizedData.servers.length
+      : normalizedData?.servers
+        ? Object.keys(normalizedData.servers).length
+        : 0;
+    if (cloned.serversCount == null) {
+      cloned.serversCount = serversCount;
+    }
+
+    if (!cloned.defaultContentType && normalizedData?.defaultContentType) {
+      cloned.defaultContentType = normalizedData.defaultContentType;
+    }
+
+    const createdAt = cloned.createdAt ? new Date(cloned.createdAt) : now;
+    const updatedAt = cloned.updatedAt ? new Date(cloned.updatedAt) : createdAt;
+
+    cloned.createdAt = createdAt;
+    cloned.updatedAt = updatedAt;
+
+    return cloned;
+  }
+
+  buildSearchableFieldsFromSummary(summary = {}) {
     const toLower = value => (typeof value === 'string' ? value.toLowerCase() : '');
 
+    const tags = Array.isArray(summary.tags)
+      ? summary.tags
+      : summary.tags
+        ? [summary.tags]
+        : [];
+
     return {
-      title: toLower(metadata.title || service.title || ''),
-      description: toLower(metadata.description || service.description || ''),
-      version: metadata.version || service.version || '',
-      protocol: toLower(metadata.protocol || ''),
-      tags: Array.from(
-        new Set(
-          (Array.isArray(tagsSource) ? tagsSource : [tagsSource])
-            .filter(Boolean)
-            .map(tag => tag.toString().toLowerCase())
-        )
-      )
+      title: toLower(summary.title || ''),
+      description: toLower(summary.description || ''),
+      version: summary.version || '',
+      protocol: toLower(summary.protocol || ''),
+      tags: Array.from(new Set(tags.filter(Boolean).map(tag => toLower(tag))))
     };
   }
 
@@ -135,48 +153,30 @@ class MongoService {
    * @returns {Promise<Object>} Insert result with identifiers
    */
   async insertAsyncAPIDocument(asyncAPIData) {
-    const { normalized, metadata, original } = this.prepareDocumentParts(asyncAPIData);
-    const sanitizedMetadata = this.sanitizeMetadata(metadata);
-
-    const metadataCollection = this.getMetadataCollection();
+    const { normalized, summary, searchableFields, original } = this.prepareDocumentParts(asyncAPIData);
     const normalizedCollection = this.getNormalizedCollection();
     const originalCollection = this.getOriginalCollection();
 
-    let metadataResult;
     let normalizedResult;
     let originalResult;
 
     try {
-      metadataResult = await metadataCollection.insertOne({ ...sanitizedMetadata });
-      const metadataId = metadataResult.insertedId;
-
       const normalizedDocument = {
         ...normalized,
-        metadata: { ...sanitizedMetadata },
-        metadataId
+        summary,
+        searchableFields
       };
 
       normalizedResult = await normalizedCollection.insertOne(normalizedDocument);
-      await metadataCollection.updateOne(
-        { _id: metadataId },
-        { $set: { normalizedId: normalizedResult.insertedId } }
-      );
 
       const originalDocument = this.buildOriginalDocument(
         original,
         normalizedDocument,
-        metadataId,
-        normalizedResult.insertedId,
-        sanitizedMetadata
+        normalizedResult.insertedId
       );
 
       if (originalDocument) {
         originalResult = await originalCollection.insertOne(originalDocument);
-
-        await metadataCollection.updateOne(
-          { _id: metadataId },
-          { $set: { originalId: originalResult.insertedId } }
-        );
       }
 
       console.log(`💾 Document inserted with ID: ${normalizedResult.insertedId}`);
@@ -185,7 +185,6 @@ class MongoService {
         success: true,
         insertedId: normalizedResult.insertedId,
         normalizedId: normalizedResult.insertedId,
-        metadataId,
         originalId: originalResult ? originalResult.insertedId : null,
         document: normalizedDocument
       };
@@ -198,10 +197,6 @@ class MongoService {
 
       if (normalizedResult?.insertedId) {
         await normalizedCollection.deleteOne({ _id: normalizedResult.insertedId }).catch(() => {});
-      }
-
-      if (metadataResult?.insertedId) {
-        await metadataCollection.deleteOne({ _id: metadataResult.insertedId }).catch(() => {});
       }
 
       throw error;
@@ -247,7 +242,7 @@ class MongoService {
     }
   }
 
-  buildOriginalDocument(original, normalizedDocument, metadataId, normalizedId, sanitizedMetadata) {
+  buildOriginalDocument(original, normalizedDocument, normalizedId) {
     let documentContent = null;
     let rawContent = null;
 
@@ -276,22 +271,10 @@ class MongoService {
       delete documentContent._id;
     }
 
-    if (documentContent.metadataId) {
-      delete documentContent.metadataId;
-    }
-
-    if (documentContent.metadata) {
-      delete documentContent.metadata;
-    }
-
-    const metadata = this.sanitizeMetadata({ ...sanitizedMetadata });
-
     const baseOriginalDocument = {
-      metadata,
-      metadataId,
       normalizedId,
-      createdAt: metadata.createdAt,
-      updatedAt: metadata.updatedAt,
+      createdAt: new Date(),
+      updatedAt: new Date(),
       document: documentContent
     };
 
@@ -314,7 +297,7 @@ class MongoService {
       
       const {
         limit = 10,
-        sort = { 'metadata.createdAt': -1 },
+        sort = { 'summary.createdAt': -1 },
         projection = null
       } = options;
 
@@ -368,39 +351,52 @@ class MongoService {
       const collection = this.getNormalizedCollection();
       const objectId = typeof id === 'string' ? new ObjectId(id) : id;
 
-      const existingDoc = await collection.findOne(
-        { _id: objectId },
-        { projection: { metadataId: 1 } }
-      );
-
-      if (!existingDoc) {
-        throw new Error(`Document with ID ${id} not found`);
-      }
-
       const updateTimestamp = new Date();
-      const updateData = {
-        ...updates,
-        'metadata.updatedAt': updateTimestamp
-      };
+      const setUpdates = {};
+      let affectsSummary = false;
+
+      Object.entries(updates || {}).forEach(([key, value]) => {
+        if (key === 'summary' && value && typeof value === 'object') {
+          affectsSummary = true;
+          Object.entries(value).forEach(([innerKey, innerValue]) => {
+            setUpdates[`summary.${innerKey}`] = innerValue;
+          });
+        } else {
+          setUpdates[key] = value;
+          if (key.startsWith('summary.')) {
+            affectsSummary = true;
+          }
+        }
+      });
+
+      setUpdates['summary.updatedAt'] = updateTimestamp;
 
       const result = await collection.updateOne(
         { _id: objectId },
-        { $set: updateData }
+        { $set: setUpdates }
       );
 
-      let metadataUpdateResult = { matchedCount: 0, modifiedCount: 0 };
-      if (existingDoc.metadataId) {
-        const metadataUpdates = this.extractMetadataUpdates(updates);
-        metadataUpdates.updatedAt = this.ensureMetadataValue('updatedAt', updateTimestamp);
+      if (result.matchedCount === 0) {
+        throw new Error(`Document with ID ${id} not found`);
+      }
 
-        metadataUpdateResult = await this.getMetadataCollection().updateOne(
-          { _id: existingDoc.metadataId },
-          { $set: metadataUpdates }
+      if (result.modifiedCount > 0) {
+        const doc = await collection.findOne(
+          { _id: objectId },
+          { projection: { summary: 1 } }
         );
 
+        if (doc?.summary) {
+          const refreshedSearchable = this.buildSearchableFieldsFromSummary(doc.summary);
+          await collection.updateOne(
+            { _id: objectId },
+            { $set: { searchableFields: refreshedSearchable } }
+          );
+        }
+
         await this.getOriginalCollection().updateMany(
-          { metadataId: existingDoc.metadataId },
-          { $set: { updatedAt: this.ensureMetadataValue('updatedAt', updateTimestamp) } }
+          { normalizedId: objectId },
+          { $set: { updatedAt: updateTimestamp } }
         );
       }
 
@@ -409,56 +405,12 @@ class MongoService {
       return {
         success: true,
         modifiedCount: result.modifiedCount,
-        matchedCount: result.matchedCount,
-        metadataMatchedCount: metadataUpdateResult.matchedCount,
-        metadataModifiedCount: metadataUpdateResult.modifiedCount
+        matchedCount: result.matchedCount
       };
     } catch (error) {
       console.error('❌ Error updating document:', error.message);
       throw error;
     }
-  }
-
-  /**
-   * Extract metadata-specific updates from payload
-   * @param {Object} updates - Update payload
-   * @returns {Object} Metadata updates
-   */
-  extractMetadataUpdates(updates = {}) {
-    const metadataUpdates = {};
-
-    if (!updates || typeof updates !== 'object') {
-      return metadataUpdates;
-    }
-
-    if (updates.metadata && typeof updates.metadata === 'object') {
-      Object.entries(updates.metadata).forEach(([key, value]) => {
-        metadataUpdates[key] = this.ensureMetadataValue(key, value);
-      });
-    }
-
-    Object.entries(updates).forEach(([key, value]) => {
-      if (key.startsWith('metadata.')) {
-        const metadataKey = key.replace('metadata.', '');
-        metadataUpdates[metadataKey] = this.ensureMetadataValue(metadataKey, value);
-      }
-    });
-
-    return metadataUpdates;
-  }
-
-  /**
-   * Normalize metadata field values (e.g. ensure Date instances)
-   * @param {string} key - Metadata field key
-   * @param {*} value - Field value
-   * @returns {*} Normalized value
-   */
-  ensureMetadataValue(key, value) {
-    if (['createdAt', 'updatedAt', 'processedAt'].includes(key) && value) {
-      return new Date(value);
-    }
-
-    return value;
   }
 
   /**
@@ -471,44 +423,31 @@ class MongoService {
       const collection = this.getNormalizedCollection();
       const objectId = typeof id === 'string' ? new ObjectId(id) : id;
 
-      const document = await collection.findOne(
-        { _id: objectId },
-        { projection: { metadataId: 1 } }
-      );
+      const document = await collection.findOne({ _id: objectId });
 
       if (!document) {
         console.warn(`⚠️ Document with ID ${id} not found (or already deleted)`);
         return {
           success: true,
           deletedCount: 0,
-          metadataDeletedCount: 0,
           originalDeletedCount: 0
         };
       }
 
       const result = await collection.deleteOne({ _id: objectId });
 
-      let metadataDeletedCount = 0;
       let originalDeletedCount = 0;
 
-      if (document.metadataId) {
-        const metadataResult = await this.getMetadataCollection().deleteOne({
-          _id: document.metadataId
-        });
-        metadataDeletedCount = metadataResult.deletedCount;
-
-        const originalResult = await this.getOriginalCollection().deleteMany({
-          metadataId: document.metadataId
-        });
-        originalDeletedCount = originalResult.deletedCount;
-      }
+      const originalResult = await this.getOriginalCollection().deleteMany({
+        normalizedId: objectId
+      });
+      originalDeletedCount = originalResult.deletedCount;
 
       console.log(`🗑️ Document deleted: ${result.deletedCount} document(s) removed`);
 
       return {
         success: true,
         deletedCount: result.deletedCount,
-        metadataDeletedCount,
         originalDeletedCount
       };
     } catch (error) {
