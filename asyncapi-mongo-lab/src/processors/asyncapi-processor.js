@@ -180,6 +180,7 @@ class AsyncAPIProcessor {
       const normalized = this.normalize(conversion.document);
       const summary = this.buildSummary(conversion.document);
       const searchableFields = this.buildSearchableFields(summary);
+      const flattened = this.flattenMetadata(conversion.document);
 
       console.log('✅ AsyncAPI processing completed successfully');
       return { original, parsed, converted: conversion.content, normalized, summary, searchableFields, validation };
