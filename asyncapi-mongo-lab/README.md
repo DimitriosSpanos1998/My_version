@@ -42,7 +42,6 @@ You'll learn how to:
    echo "MONGODB_URI=mongodb://localhost:27017/asyncapi-lab" > .env
    echo "DB_NAME=asyncapi-lab" >> .env
    echo "NORMALIZED_COLLECTION_NAME=asyncapi_normalized" >> .env
-   echo "METADATA_COLLECTION_NAME=asyncapi_metadata" >> .env
    echo "ORIGINAL_COLLECTION_NAME=asyncapi_originals" >> .env
    ```
 
@@ -108,10 +107,7 @@ Create a `.env` file in the project root:
 MONGODB_URI=mongodb://localhost:27017/asyncapi-lab
 DB_NAME=asyncapi-lab
 NORMALIZED_COLLECTION_NAME=asyncapi_normalized
-METADATA_COLLECTION_NAME=asyncapi_metadata
 ORIGINAL_COLLECTION_NAME=asyncapi_originals
-# Optional legacy fallback
-COLLECTION_NAME=asyncapi_normalized
 
 # Optional: MongoDB Atlas connection
 # MONGODB_URI=mongodb+srv://username:password@cluster.mongodb.net/asyncapi-lab?retryWrites=true&w=majority
@@ -124,11 +120,11 @@ LOG_LEVEL=info
 
 The lab uses three MongoDB collections to separate different representations of each AsyncAPI document:
 
-- **Normalized** (`NORMALIZED_COLLECTION_NAME`): Stores the enriched, query-ready document (including metadata and searchable fields).
-- **Metadata** (`METADATA_COLLECTION_NAME`): Stores a dedicated metadata document for fast lookups and cross-collection references.
+- **Normalized** (`NORMALIZED_COLLECTION_NAME`): Stores the converted AsyncAPI 3.0.0 specification along with quick summary fields for searching.
 - **Original** (`ORIGINAL_COLLECTION_NAME`): Stores the raw AsyncAPI source content for auditing or re-processing purposes.
 
-Each insert operation automatically writes to all three collections and keeps the metadata document synchronized during updates and deletions.
+Each insert operation automatically writes to both collections. The normalized document keeps lightweight summary information so most
+queries can be served without reading the original specification.
 
 ### MongoDB Setup Options
 
@@ -179,7 +175,7 @@ The `MongoService` class provides:
 const mongoService = new MongoService();
 await mongoService.connect();
 
-// Insert document across original, normalized, and metadata collections
+// Insert document across normalized and original collections
 const result = await mongoService.insertAsyncAPIDocument({
   original: JSON.stringify(asyncAPISpec, null, 2),
   normalized: normalizedData
@@ -218,7 +214,7 @@ const userDocs = await mongoService.searchAsyncAPIDocuments('user');
 ```javascript
 const updateResult = await mongoService.updateAsyncAPIDocument(
   documentId,
-  { 'metadata.description': 'Updated description' }
+  { 'summary.description': 'Updated description' }
 );
 ```
 
@@ -247,13 +243,13 @@ const searchResults = await mongoService.searchAsyncAPIDocuments('sensor');
 ```javascript
 // Complex criteria
 const complexDocs = await mongoService.findAsyncAPIDocuments({
-  'metadata.channelsCount': { $gt: 2 },
-  'metadata.serversCount': { $gte: 1 }
+  'summary.channelsCount': { $gt: 2 },
+  'summary.serversCount': { $gte: 1 }
 });
 
 // Date range
 const recentDocs = await mongoService.findAsyncAPIDocuments({
-  'metadata.createdAt': { $gte: new Date('2023-01-01') }
+  'summary.createdAt': { $gte: new Date('2023-01-01') }
 });
 ```
 
@@ -264,9 +260,9 @@ const recentDocs = await mongoService.findAsyncAPIDocuments({
 const protocolStats = await collection.aggregate([
   {
     $group: {
-      _id: '$metadata.protocol',
+      _id: '$summary.protocol',
       count: { $sum: 1 },
-      avgChannels: { $avg: '$metadata.channelsCount' }
+      avgChannels: { $avg: '$summary.channelsCount' }
     }
   },
   { $sort: { count: -1 } }

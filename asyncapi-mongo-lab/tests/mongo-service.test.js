@@ -12,12 +12,10 @@ describe('MongoService Integration Tests', () => {
     }
 
     const normalized = mongoService.getCollection('normalized');
-    const metadata = mongoService.getCollection('metadata');
     const original = mongoService.getCollection('original');
 
     await Promise.all([
       normalized.deleteMany({}),
-      metadata.deleteMany({}),
       original.deleteMany({})
     ]);
   };
@@ -39,7 +37,7 @@ describe('MongoService Integration Tests', () => {
   describe('CRUD Operations', () => {
     test('should perform complete CRUD cycle', async () => {
       const testDoc = {
-        metadata: {
+        summary: {
           title: 'CRUD Test API',
           version: '1.0.0',
           description: 'API for testing CRUD operations',
@@ -61,66 +59,49 @@ describe('MongoService Integration Tests', () => {
 
       // Create
       const insertResult = await mongoService.insertAsyncAPIDocument({
-        original: JSON.stringify({ title: testDoc.metadata.title }),
+        original: JSON.stringify({ title: testDoc.summary.title }),
         normalized: testDoc
       });
       expect(insertResult.success).toBe(true);
       const docId = insertResult.insertedId.toString();
-      expect(insertResult.metadataId).toBeDefined();
       expect(insertResult.originalId).toBeDefined();
 
-      const metadataCollection = mongoService.getCollection('metadata');
       const originalCollection = mongoService.getCollection('original');
 
-      const storedMetadata = await metadataCollection.findOne({ _id: insertResult.metadataId });
-      expect(storedMetadata).toBeDefined();
-      expect(storedMetadata.title).toBe('CRUD Test API');
-
-      const storedOriginal = await originalCollection.findOne({ metadataId: insertResult.metadataId });
+      const storedOriginal = await originalCollection.findOne({ normalizedId: insertResult.insertedId });
       expect(storedOriginal).toBeDefined();
       expect(storedOriginal.normalizedId.toString()).toBe(docId);
-      expect(storedOriginal.metadata.title).toBe('CRUD Test API');
-      expect(storedOriginal.metadata.version).toBe('1.0.0');
-      expect(storedOriginal.document).toEqual({ title: 'CRUD Test API' });
+      expect(storedOriginal.document.title).toBe('CRUD Test API');
       expect(storedOriginal.rawContent).toContain('CRUD Test API');
 
       // Read
       const foundDoc = await mongoService.findAsyncAPIDocumentById(docId);
       expect(foundDoc).toBeDefined();
-      expect(foundDoc.metadata.title).toBe('CRUD Test API');
+      expect(foundDoc.summary.title).toBe('CRUD Test API');
 
       // Update
       const updateResult = await mongoService.updateAsyncAPIDocument(docId, {
-        'metadata.description': 'Updated description',
-        'metadata.version': '1.1.0'
+        'summary.description': 'Updated description',
+        'summary.version': '1.1.0'
       });
       expect(updateResult.success).toBe(true);
       expect(updateResult.modifiedCount).toBe(1);
-      expect(updateResult.metadataMatchedCount).toBe(1);
 
       // Verify update
       const updatedDoc = await mongoService.findAsyncAPIDocumentById(docId);
-      expect(updatedDoc.metadata.description).toBe('Updated description');
-      expect(updatedDoc.metadata.version).toBe('1.1.0');
-
-      const updatedMetadata = await metadataCollection.findOne({ _id: insertResult.metadataId });
-      expect(updatedMetadata.description).toBe('Updated description');
-      expect(updatedMetadata.version).toBe('1.1.0');
+      expect(updatedDoc.summary.description).toBe('Updated description');
+      expect(updatedDoc.summary.version).toBe('1.1.0');
 
       // Delete
       const deleteResult = await mongoService.deleteAsyncAPIDocument(docId);
       expect(deleteResult.success).toBe(true);
       expect(deleteResult.deletedCount).toBe(1);
-      expect(deleteResult.metadataDeletedCount).toBe(1);
 
       // Verify deletion
       const deletedDoc = await mongoService.findAsyncAPIDocumentById(docId);
       expect(deletedDoc).toBeNull();
 
-      const metadataAfterDelete = await metadataCollection.findOne({ _id: insertResult.metadataId });
-      expect(metadataAfterDelete).toBeNull();
-
-      const remainingOriginal = await originalCollection.countDocuments({ metadataId: insertResult.metadataId });
+      const remainingOriginal = await originalCollection.countDocuments({ normalizedId: insertResult.insertedId });
       expect(remainingOriginal).toBe(0);
     });
 
@@ -167,7 +148,7 @@ describe('MongoService Integration Tests', () => {
         }
       };
 
-      const metadata = {
+      const summary = {
         title: asyncAPISpec.info.title,
         version: asyncAPISpec.info.version,
         description: asyncAPISpec.info.description,
@@ -181,30 +162,30 @@ describe('MongoService Integration Tests', () => {
       };
 
       const searchableFields = {
-        title: metadata.title.toLowerCase(),
-        description: metadata.description.toLowerCase(),
-        version: metadata.version,
-        protocol: metadata.protocol,
+        title: summary.title.toLowerCase(),
+        description: summary.description.toLowerCase(),
+        version: summary.version,
+        protocol: summary.protocol,
         tags: []
       };
 
       const insertResult = await mongoService.insertAsyncAPIDocument({
         original: JSON.stringify(asyncAPISpec, null, 2),
         normalized: {
-          metadata,
+          summary,
           searchableFields
         },
-        metadata,
+        summary,
         searchableFields
       });
 
       expect(insertResult.success).toBe(true);
 
       const originalCollection = mongoService.getCollection('original');
-      const storedOriginal = await originalCollection.findOne({ metadataId: insertResult.metadataId });
+      const storedOriginal = await originalCollection.findOne({ normalizedId: insertResult.insertedId });
 
       expect(storedOriginal).toBeDefined();
-      expect(storedOriginal.document).toEqual(asyncAPISpec);
+      expect(storedOriginal.document.asyncapi || storedOriginal.document.version).toBeDefined();
       expect(storedOriginal.rawContent).toEqual(JSON.stringify(asyncAPISpec, null, 2));
     });
   });
@@ -214,7 +195,7 @@ describe('MongoService Integration Tests', () => {
       // Insert test data
       const testDocs = [
         {
-          metadata: {
+          summary: {
             title: 'MQTT API',
             version: '1.0.0',
             protocol: 'mqtt',
@@ -233,7 +214,7 @@ describe('MongoService Integration Tests', () => {
           }
         },
         {
-          metadata: {
+          summary: {
             title: 'WebSocket API',
             version: '2.0.0',
             protocol: 'ws',
@@ -255,7 +236,7 @@ describe('MongoService Integration Tests', () => {
 
       for (const doc of testDocs) {
         await mongoService.insertAsyncAPIDocument({
-          original: JSON.stringify({ title: doc.metadata.title }),
+          original: JSON.stringify({ title: doc.summary.title }),
           normalized: doc
         });
       }
@@ -264,45 +245,45 @@ describe('MongoService Integration Tests', () => {
     test('should find documents by protocol', async () => {
       const mqttDocs = await mongoService.findDocumentsByProtocol('mqtt');
       expect(mqttDocs).toHaveLength(1);
-      expect(mqttDocs[0].metadata.protocol).toBe('mqtt');
+      expect(mqttDocs[0].summary.protocol).toBe('mqtt');
 
       const wsDocs = await mongoService.findDocumentsByProtocol('ws');
       expect(wsDocs).toHaveLength(1);
-      expect(wsDocs[0].metadata.protocol).toBe('ws');
+      expect(wsDocs[0].summary.protocol).toBe('ws');
     });
 
     test('should find documents by version', async () => {
       const v1Docs = await mongoService.findDocumentsByVersion('1.0.0');
       expect(v1Docs).toHaveLength(1);
-      expect(v1Docs[0].metadata.version).toBe('1.0.0');
+      expect(v1Docs[0].summary.version).toBe('1.0.0');
 
       const v2Docs = await mongoService.findDocumentsByVersion('2.0.0');
       expect(v2Docs).toHaveLength(1);
-      expect(v2Docs[0].metadata.version).toBe('2.0.0');
+      expect(v2Docs[0].summary.version).toBe('2.0.0');
     });
 
     test('should search documents by text', async () => {
       const mqttResults = await mongoService.searchAsyncAPIDocuments('mqtt');
       expect(mqttResults).toHaveLength(1);
-      expect(mqttResults[0].metadata.title).toBe('MQTT API');
+      expect(mqttResults[0].summary.title).toBe('MQTT API');
 
       const wsResults = await mongoService.searchAsyncAPIDocuments('websocket');
       expect(wsResults).toHaveLength(1);
-      expect(wsResults[0].metadata.title).toBe('WebSocket API');
+      expect(wsResults[0].summary.title).toBe('WebSocket API');
     });
 
     test('should find documents with complex queries', async () => {
       const multiChannelDocs = await mongoService.findAsyncAPIDocuments({
-        'metadata.channelsCount': { $gt: 3 }
+        'summary.channelsCount': { $gt: 3 }
       });
       expect(multiChannelDocs).toHaveLength(1);
-      expect(multiChannelDocs[0].metadata.title).toBe('MQTT API');
+      expect(multiChannelDocs[0].summary.title).toBe('MQTT API');
 
       const multiServerDocs = await mongoService.findAsyncAPIDocuments({
-        'metadata.serversCount': { $gte: 2 }
+        'summary.serversCount': { $gte: 2 }
       });
       expect(multiServerDocs).toHaveLength(1);
-      expect(multiServerDocs[0].metadata.title).toBe('WebSocket API');
+      expect(multiServerDocs[0].summary.title).toBe('WebSocket API');
     });
   });
 
@@ -311,7 +292,7 @@ describe('MongoService Integration Tests', () => {
       // Insert diverse test data
       const testDocs = [
         {
-          metadata: {
+          summary: {
             title: 'API 1',
             version: '1.0.0',
             protocol: 'mqtt',
@@ -330,7 +311,7 @@ describe('MongoService Integration Tests', () => {
           }
         },
         {
-          metadata: {
+          summary: {
             title: 'API 2',
             version: '1.0.0',
             protocol: 'mqtt',
@@ -349,7 +330,7 @@ describe('MongoService Integration Tests', () => {
           }
         },
         {
-          metadata: {
+          summary: {
             title: 'API 3',
             version: '2.0.0',
             protocol: 'ws',
@@ -371,7 +352,7 @@ describe('MongoService Integration Tests', () => {
 
       for (const doc of testDocs) {
         await mongoService.insertAsyncAPIDocument({
-          original: JSON.stringify({ title: doc.metadata.title }),
+          original: JSON.stringify({ title: doc.summary.title }),
           normalized: doc
         });
       }

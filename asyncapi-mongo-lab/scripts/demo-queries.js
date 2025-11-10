@@ -47,7 +47,7 @@ class DemoQueries {
     const allDocs = await this.mongoService.getAllAsyncAPIDocuments({ limit: 3 });
     console.log(`   Found ${allDocs.length} documents`);
     allDocs.forEach((doc, index) => {
-      console.log(`   ${index + 1}. ${doc.metadata.title} (${doc.metadata.protocol})`);
+      console.log(`   ${index + 1}. ${doc.summary.title} (${doc.summary.protocol})`);
     });
 
     // Find by protocol
@@ -87,13 +87,13 @@ class DemoQueries {
     // Complex queries
     console.log('\n1. Documents with multiple channels:');
     const multiChannelDocs = await this.mongoService.findAsyncAPIDocuments({
-      'metadata.channelsCount': { $gt: 2 }
+      'summary.channelsCount': { $gt: 2 }
     });
     console.log(`   Found ${multiChannelDocs.length} documents with >2 channels`);
 
     console.log('\n2. Documents with specific server count:');
     const serverDocs = await this.mongoService.findAsyncAPIDocuments({
-      'metadata.serversCount': { $gte: 2 }
+      'summary.serversCount': { $gte: 2 }
     });
     console.log(`   Found ${serverDocs.length} documents with ≥2 servers`);
 
@@ -101,7 +101,7 @@ class DemoQueries {
     const yesterday = new Date();
     yesterday.setDate(yesterday.getDate() - 1);
     const recentDocs = await this.mongoService.findAsyncAPIDocuments({
-      'metadata.createdAt': { $gte: yesterday }
+      'summary.createdAt': { $gte: yesterday }
     });
     console.log(`   Found ${recentDocs.length} documents created in last 24 hours`);
 
@@ -114,11 +114,11 @@ class DemoQueries {
     console.log('\n5. Documents sorted by creation date:');
     const sortedDocs = await this.mongoService.findAsyncAPIDocuments(
       {},
-      { sort: { 'metadata.createdAt': -1 }, limit: 3 }
+      { sort: { 'summary.createdAt': -1 }, limit: 3 }
     );
     console.log('   Most recent documents:');
     sortedDocs.forEach((doc, index) => {
-      console.log(`     ${index + 1}. ${doc.metadata.title} (${doc.metadata.createdAt.toISOString()})`);
+      console.log(`     ${index + 1}. ${doc.summary.title} (${doc.summary.createdAt.toISOString()})`);
     });
   }
 
@@ -136,10 +136,10 @@ class DemoQueries {
     const protocolStats = await collection.aggregate([
       {
         $group: {
-          _id: '$metadata.protocol',
+          _id: '$summary.protocol',
           count: { $sum: 1 },
-          avgChannels: { $avg: '$metadata.channelsCount' },
-          avgServers: { $avg: '$metadata.serversCount' }
+          avgChannels: { $avg: '$summary.channelsCount' },
+          avgServers: { $avg: '$summary.serversCount' }
         }
       },
       { $sort: { count: -1 } }
@@ -154,9 +154,9 @@ class DemoQueries {
     const versionStats = await collection.aggregate([
       {
         $group: {
-          _id: '$metadata.version',
+          _id: '$summary.version',
           count: { $sum: 1 },
-          protocols: { $addToSet: '$metadata.protocol' }
+          protocols: { $addToSet: '$summary.protocol' }
         }
       },
       { $sort: { count: -1 } }
@@ -170,16 +170,16 @@ class DemoQueries {
     console.log('\n3. Complex aggregation pipeline:');
     const complexStats = await collection.aggregate([
       // Match documents with channels
-      { $match: { 'metadata.channelsCount': { $gt: 0 } } },
+      { $match: { 'summary.channelsCount': { $gt: 0 } } },
       
       // Group by protocol
       {
         $group: {
-          _id: '$metadata.protocol',
-          totalChannels: { $sum: '$metadata.channelsCount' },
-          totalServers: { $sum: '$metadata.serversCount' },
+          _id: '$summary.protocol',
+          totalChannels: { $sum: '$summary.channelsCount' },
+          totalServers: { $sum: '$summary.serversCount' },
           documentCount: { $sum: 1 },
-          titles: { $push: '$metadata.title' }
+          titles: { $push: '$summary.title' }
         }
       },
       
@@ -209,12 +209,12 @@ class DemoQueries {
       {
         $group: {
           _id: {
-            year: { $year: '$metadata.createdAt' },
-            month: { $month: '$metadata.createdAt' },
-            day: { $dayOfMonth: '$metadata.createdAt' }
+            year: { $year: '$summary.createdAt' },
+            month: { $month: '$summary.createdAt' },
+            day: { $dayOfMonth: '$summary.createdAt' }
           },
           count: { $sum: 1 },
-          protocols: { $addToSet: '$metadata.protocol' }
+          protocols: { $addToSet: '$summary.protocol' }
         }
       },
       { $sort: { '_id.year': -1, '_id.month': -1, '_id.day': -1 } },
