@@ -215,6 +215,10 @@ describe('MongoService Integration Tests', () => {
             updatedAt: new Date(),
             processedAt: new Date()
           },
+            createdAt: new Date(),
+            updatedAt: new Date(),
+            processedAt: new Date()
+          },
           searchableFields: {
             title: 'websocket api',
             description: 'websocket protocol api',
@@ -264,6 +268,38 @@ describe('MongoService Integration Tests', () => {
     });
 
     test('should find documents with complex queries', async () => {
+
+    test('should find documents by protocol', async () => {
+      const mqttDocs = await mongoService.findDocumentsByProtocol('mqtt');
+      expect(mqttDocs).toHaveLength(1);
+      expect(mqttDocs[0].summary.protocol).toBe('mqtt');
+
+      const wsDocs = await mongoService.findDocumentsByProtocol('ws');
+      expect(wsDocs).toHaveLength(1);
+      expect(wsDocs[0].summary.protocol).toBe('ws');
+    });
+
+    test('should find documents by version', async () => {
+      const v1Docs = await mongoService.findDocumentsByVersion('1.0.0');
+      expect(v1Docs).toHaveLength(1);
+      expect(v1Docs[0].summary.version).toBe('1.0.0');
+
+      const v2Docs = await mongoService.findDocumentsByVersion('2.0.0');
+      expect(v2Docs).toHaveLength(1);
+      expect(v2Docs[0].summary.version).toBe('2.0.0');
+    });
+
+    test('should search documents by text', async () => {
+      const mqttResults = await mongoService.searchAsyncAPIDocuments('mqtt');
+      expect(mqttResults).toHaveLength(1);
+      expect(mqttResults[0].summary.title).toBe('MQTT API');
+
+      const wsResults = await mongoService.searchAsyncAPIDocuments('websocket');
+      expect(wsResults).toHaveLength(1);
+      expect(wsResults[0].summary.title).toBe('WebSocket API');
+    });
+
+    test('should find documents with complex queries', async () => {
       const multiChannelDocs = await mongoService.findAsyncAPIDocuments({
         'summary.channelsCount': { $gt: 3 }
       });
@@ -280,6 +316,12 @@ describe('MongoService Integration Tests', () => {
 
   describe('Statistics and Aggregations', () => {
     beforeEach(async () => {
+    });
+  });
+
+  describe('Statistics and Aggregations', () => {
+    beforeEach(async () => {
+      // Insert diverse test data
       const testDocs = [
         {
           summary: {
@@ -288,6 +330,10 @@ describe('MongoService Integration Tests', () => {
             protocol: 'mqtt',
             channelsCount: 2,
             serversCount: 1,
+            createdAt: new Date(),
+            updatedAt: new Date(),
+            processedAt: new Date()
+          },
             createdAt: new Date(),
             updatedAt: new Date(),
             processedAt: new Date()
@@ -311,6 +357,10 @@ describe('MongoService Integration Tests', () => {
             updatedAt: new Date(),
             processedAt: new Date()
           },
+            createdAt: new Date(),
+            updatedAt: new Date(),
+            processedAt: new Date()
+          },
           searchableFields: {
             title: 'api 2',
             description: 'second api',
@@ -326,6 +376,10 @@ describe('MongoService Integration Tests', () => {
             protocol: 'ws',
             channelsCount: 1,
             serversCount: 2,
+            createdAt: new Date(),
+            updatedAt: new Date(),
+            processedAt: new Date()
+          },
             createdAt: new Date(),
             updatedAt: new Date(),
             processedAt: new Date()
