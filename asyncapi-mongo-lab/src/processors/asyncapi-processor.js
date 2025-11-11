@@ -17,6 +17,10 @@ class AsyncAPIProcessor {
     this.supportedFormats = ['yaml', 'json', 'yml'];
     // δέχεται dependency injection για tests (mock) ή χρησιμοποιεί το κανονικό DB
     this.db = db || DatabaseConfig;
+
+    // Backwards compatibility aliases (παλαιότερα scripts/cli calls)
+    this.processAsyncAPIFile = this.processAsyncAPIFile.bind(this);
+    this.processFile = this.process.bind(this);
   }
 
   /** Load file from disk as UTF-8 string */
@@ -403,6 +407,12 @@ class AsyncAPIProcessor {
   async processAsyncAPIFile(filePath, targetFormat = 'json') {
     return this.process(filePath, targetFormat);
   }
+
+  async processAsyncAPI(filePath, targetFormat = 'json') {
+    return this.processAsyncAPIFile(filePath, targetFormat);
+  }
 }
 
 module.exports = AsyncAPIProcessor;
+module.exports.AsyncAPIProcessor = AsyncAPIProcessor;
+module.exports.default = AsyncAPIProcessor;
