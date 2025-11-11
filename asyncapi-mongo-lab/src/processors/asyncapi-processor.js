@@ -336,8 +336,7 @@ class AsyncAPIProcessor {
       normalizedId: normalizedId || null,
       filePath,
       createdAt: new Date(),
-      updatedAt: new Date(),
-      ...extra
+      updatedAt: new Date()
     };
 
     if (doc.protocol == null && Array.isArray(asyncServiceEntry?.Server)) {
