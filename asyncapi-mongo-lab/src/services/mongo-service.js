@@ -80,7 +80,6 @@ class MongoService {
 
   ensureSummary(summary = {}, normalizedData = {}) {
     const cloned = { ...summary };
-    const now = new Date();
 
     if (!cloned.title && normalizedData?.info?.title) {
       cloned.title = normalizedData.info.title;
@@ -123,11 +122,13 @@ class MongoService {
       cloned.defaultContentType = normalizedData.defaultContentType;
     }
 
-    const createdAt = cloned.createdAt ? new Date(cloned.createdAt) : now;
-    const updatedAt = cloned.updatedAt ? new Date(cloned.updatedAt) : createdAt;
+    if (Object.prototype.hasOwnProperty.call(cloned, 'createdAt')) {
+      delete cloned.createdAt;
+    }
 
-    cloned.createdAt = createdAt;
-    cloned.updatedAt = updatedAt;
+    if (Object.prototype.hasOwnProperty.call(cloned, 'updatedAt')) {
+      delete cloned.updatedAt;
+    }
 
     return cloned;
   }
