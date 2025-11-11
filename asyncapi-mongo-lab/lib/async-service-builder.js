@@ -12,447 +12,266 @@ const uuidv4 = () => {
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 };
 
-const asArray = (value) => (Array.isArray(value) ? value : value == null ? [] : [value]);
-const cleanStr = (value) => (typeof value === 'string' ? value : undefined);
+/** helpers */
+const asArray = (x) => (Array.isArray(x) ? x : x == null ? [] : [x]);
+const cleanStr = (s) => (typeof s === 'string' ? s : undefined);
 
-const decodePointerSegment = (segment) => segment.replace(/~1/g, '/').replace(/~0/g, '~');
-
-const resolveJsonPointer = (root, ref) => {
-  if (typeof ref !== 'string' || !ref.startsWith('#/')) {
-    return undefined;
-  }
-
-  const segments = ref
-    .slice(2)
-    .split('/')
-    .map(decodePointerSegment)
-    .filter(Boolean);
-
-  let current = root;
-  for (const segment of segments) {
-    if (current == null || typeof current !== 'object') {
-      return undefined;
-    }
-    current = current[segment];
-  }
-
-  return current;
-};
-
-const sanitize = (value) => {
-  if (Array.isArray(value)) {
-    return value
-      .map((item) => sanitize(item))
-      .filter((item) => {
-        if (item == null) return false;
-        if (typeof item === 'object' && !Array.isArray(item) && Object.keys(item).length === 0) {
-          return false;
-        }
-        return true;
-      });
-  }
-
-  if (value && typeof value === 'object') {
-    const result = {};
-    for (const [key, val] of Object.entries(value)) {
-      const sanitized = sanitize(val);
-      if (sanitized === undefined) {
-        continue;
-      }
-      if (Array.isArray(sanitized) && sanitized.length === 0) {
-        result[key] = sanitized;
-        continue;
-      }
-      if (sanitized && typeof sanitized === 'object' && !Array.isArray(sanitized) && Object.keys(sanitized).length === 0) {
-        continue;
-      }
-      result[key] = sanitized;
-    }
-    return result;
-  }
-
-  return value === undefined ? undefined : value;
-};
-
-const resolveMessageObject = (spec, message) => {
-  if (!message || typeof message !== 'object') {
-    return message;
-  }
-
-  if (message.$ref) {
-    const resolved = resolveJsonPointer(spec, message.$ref);
-    if (resolved && resolved !== message) {
-      return resolveMessageObject(spec, resolved);
-    }
-  }
-
-  return message;
-};
-
-const collectServerSecurity = (security) =>
-  asArray(security)
-    .map((entry) => {
-      if (!entry) return null;
-      if (typeof entry === 'string') {
-        return { scheme: entry };
-      }
-      if (typeof entry === 'object') {
-        const [[scheme, scopes]] = Object.entries(entry);
-        return sanitize({ scheme, scopes: Array.isArray(scopes) ? scopes : [] });
-      }
-      return null;
-    })
-    .filter(Boolean);
-
-const collectServerVariables = (variables = {}) =>
-  Object.entries(variables).map(([name, variable]) =>
-    sanitize({
-      name,
-      default: variable?.default,
-      enum: Array.isArray(variable?.enum) ? variable.enum : undefined,
-      description: cleanStr(variable?.description)
-    })
-  );
-
-const extractServers = (spec) =>
-  Object.entries(spec.servers || {}).map(([name, server]) =>
-    sanitize({
-      name,
-      url: cleanStr(server?.url),
-      protocol: cleanStr(server?.protocol),
-      protocolVersion: cleanStr(server?.protocolVersion),
-      description: cleanStr(server?.description),
-      security: collectServerSecurity(server?.security),
-      variables: collectServerVariables(server?.variables),
-      bindings: server?.bindings || undefined
-    })
-  );
-
-const collectChannelParameters = (parameters = {}) =>
-  Object.entries(parameters).map(([name, parameter]) =>
-    sanitize({
-      name,
-      description: cleanStr(parameter?.description),
-      location: cleanStr(parameter?.location),
-      schema: parameter?.schema,
-      examples: Array.isArray(parameter?.examples) ? parameter.examples : undefined
-    })
-  );
-
-const extractChannels = (spec) =>
-  Object.entries(spec.channels || {}).map(([name, channel]) => {
-    const parameters = collectChannelParameters(channel?.parameters || {});
-    return sanitize({
-      name,
-      description: cleanStr(channel?.description),
-      servers: Array.isArray(channel?.servers) ? channel.servers : undefined,
-      parameters: parameters.length ? parameters : undefined,
-      bindings: channel?.bindings || undefined
-    });
-  });
-
-const extractTags = (spec) => {
-  const infoTags = Array.isArray(spec.info?.tags) ? spec.info.tags : [];
-  const rootTags = Array.isArray(spec.tags) ? spec.tags : [];
-  const combined = [...rootTags, ...infoTags];
-  const registry = new Map();
-
-  combined.forEach((tag) => {
-    if (!tag) return;
-    if (typeof tag === 'string') {
-      registry.set(tag, { name: tag });
-      return;
-    }
-
-    const name = cleanStr(tag.name);
-    if (!name) return;
-
-    const entry = sanitize({
-      name,
-      description: cleanStr(tag.description),
-      externalDocs: tag.externalDocs?.url
-        ? sanitize({
-            url: cleanStr(tag.externalDocs.url),
-            description: cleanStr(tag.externalDocs.description)
-          })
+function extractTags(spec, info) {
+  const raw = Array.isArray(spec.tags) ? spec.tags : Array.isArray(info?.tags) ? info.tags : [];
+  return raw
+    .map((t) => (typeof t === 'string' ? { name: t } : t))
+    .filter(Boolean)
+    .map((t) => ({
+      name: t.name,
+      description: cleanStr(t.description),
+      externalDocs: t.externalDocs?.url
+        ? { url: t.externalDocs.url, description: t.externalDocs.description }
         : undefined
-    });
+    }));
+}
 
-    registry.set(name, entry);
+function extractServers(spec) {
+  const serversObj = spec.servers || {};
+  return Object.entries(serversObj).map(([name, s]) => ({
+    name,
+    url: s?.url,
+    protocol: s?.protocol,
+    protocolVersion: s?.protocolVersion,
+    description: s?.description,
+    security: asArray(s?.security)
+      .map((x) => (typeof x === 'object' ? Object.keys(x)[0] : x))
+      .filter(Boolean),
+    variables: s?.variables
+      ? Object.entries(s.variables).map(([vn, v]) => ({
+          name: vn,
+          default: v?.default,
+          enum: Array.isArray(v?.enum) ? v.enum : undefined,
+          description: v?.description
+        }))
+      : undefined,
+    bindings: s?.bindings || undefined
+  }));
+}
+
+/** v2 publish/subscribe πάνω στο channel */
+function extractOpsV2(channelsObj) {
+  return Object.entries(channelsObj || {}).flatMap(([chName, ch]) => {
+    const out = [];
+    if (ch?.publish) {
+      out.push({
+        action: 'publish',
+        operationId: ch.publish.operationId,
+        channel: chName,
+        summary: ch.publish.summary,
+        description: ch.publish.description,
+        message: ch.publish.message
+      });
+    }
+    if (ch?.subscribe) {
+      out.push({
+        action: 'subscribe',
+        operationId: ch.subscribe.operationId,
+        channel: chName,
+        summary: ch.subscribe.summary,
+        description: ch.subscribe.description,
+        message: ch.subscribe.message
+      });
+    }
+    return out;
+  });
+}
+
+/** v3 operations */
+function extractOpsV3(spec) {
+  // δύο μορφές: spec.operations (map/array) ή channel.operations
+  const fromRoot = Array.isArray(spec.operations)
+    ? spec.operations.map((op) => ({
+        action: op?.action, // send | receive
+        operationId: op?.operationId,
+        channel: typeof op?.channel === 'string' ? op.channel : op?.channel?.$ref || op?.channel?.name,
+        summary: op?.summary,
+        description: op?.description,
+        messages: op?.messages
+      }))
+    : Object.entries(spec.operations || {}).map(([key, op]) => ({
+        action: op?.action,
+        operationId: op?.operationId || key,
+        channel: typeof op?.channel === 'string' ? op.channel : op?.channel?.$ref || op?.channel?.name,
+        summary: op?.summary,
+        description: op?.description,
+        messages: op?.messages
+      }));
+
+  const fromChannels = Object.entries(spec.channels || {}).flatMap(([chName, ch]) => {
+    const ops = [];
+    if (Array.isArray(ch?.operations)) {
+      for (const op of ch.operations) {
+        ops.push({
+          action: op?.action,
+          operationId: op?.operationId,
+          channel: chName,
+          summary: op?.summary,
+          description: op?.description,
+          messages: op?.messages
+        });
+      }
+    } else if (ch?.operations && typeof ch.operations === 'object') {
+      for (const [action, op] of Object.entries(ch.operations)) {
+        ops.push({
+          action,
+          operationId: op?.operationId,
+          channel: chName,
+          summary: op?.summary,
+          description: op?.description,
+          messages: op?.messages
+        });
+      }
+    }
+    return ops;
   });
 
-  return Array.from(registry.values());
-};
+  return [...fromRoot, ...fromChannels];
+}
 
-const extractComponents = (spec) => {
-  const components = spec.components || {};
-  const sections = [
-    'schemas',
-    'messages',
-    'securitySchemes',
-    'parameters',
-    'correlationIds',
-    'operationTraits',
-    'messageTraits',
-    'serverBindings',
-    'channelBindings',
-    'operationBindings',
-    'messageBindings'
+function normalizeMessagesFromOp(asyncapi, op) {
+  const raw = Array.isArray(op?.messages)
+    ? op.messages
+    : op?.message
+      ? asArray(op.message)
+      : [];
+
+  return raw.map((m) => ({
+    name: m?.name,
+    title: m?.title || m?.name,
+    summary: m?.summary,
+    contentType: m?.contentType || asyncapi?.defaultContentType,
+    schemaFormat: m?.schemaFormat,
+    payload: m?.payload,
+    headers: m?.headers,
+    bindings: m?.bindings
+  }));
+}
+
+function extractChannels(spec) {
+  const channelsObj = spec.channels || {};
+  return Object.entries(channelsObj).map(([name, ch]) => ({
+    name,
+    description: ch?.description,
+    servers: Array.isArray(ch?.servers) ? ch.servers : undefined, // v3 optional
+    parameters: ch?.parameters ? Object.keys(ch.parameters) : undefined,
+    bindings: ch?.bindings || undefined
+  }));
+}
+
+function extractComponents(spec) {
+  const cmp = spec.components || {};
+  const pick = (obj) => (obj ? Object.keys(obj) : []);
+  return {
+    has: Object.keys(cmp).length > 0 ? true : undefined,
+    schemas: pick(cmp.schemas),
+    messages: pick(cmp.messages),
+    securitySchemes: pick(cmp.securitySchemes),
+    parameters: pick(cmp.parameters),
+    correlationIds: pick(cmp.correlationIds),
+    operationTraits: pick(cmp.operationTraits),
+    messageTraits: pick(cmp.messageTraits),
+    serverBindings: pick(cmp.serverBindings),
+    channelBindings: pick(cmp.channelBindings),
+    operationBindings: pick(cmp.operationBindings),
+    messageBindings: pick(cmp.messageBindings)
+  };
+}
+
+function extractSecurity(spec) {
+  const sec = spec.components?.securitySchemes || {};
+  return Object.entries(sec).map(([name, s]) => {
+    const out = { name, type: s?.type };
+    if (s?.type === 'http') {
+      out.scheme = s.scheme;
+      out.bearerFormat = s.bearerFormat;
+    }
+    if (s?.type === 'oauth2') {
+      out.flows = Object.fromEntries(
+        Object.entries(s.flows || {}).map(([fname, flow]) => [
+          fname,
+          {
+            authorizationUrl: flow.authorizationUrl,
+            tokenUrl: flow.tokenUrl,
+            refreshUrl: flow.refreshUrl,
+            scopes: Object.keys(flow.scopes || {})
+          }
+        ])
+      );
+    }
+    if (s?.type === 'openIdConnect') {
+      out.openIdConnectUrl = s.openIdConnectUrl;
+    }
+    out.description = s?.description;
+    return out;
+  });
+}
+
+/**
+ * Κύρια συνάρτηση: spec → { AsyncService: [ { ... } ] }
+ */
+function buildAsyncService(spec, explicitId) {
+  const info = spec.info || {};
+  const id = explicitId || spec.id || spec['x-id'] || uuidv4();
+
+  // Servers / Channels
+  const Server = extractServers(spec);
+  const Channel = extractChannels(spec);
+
+  // Operations (v2 + v3), και flatten messages (unique by title/name)
+  const ops = [...extractOpsV3(spec), ...extractOpsV2(spec.channels || {})];
+  const Message = [];
+  for (const op of ops) {
+    const msgs = normalizeMessagesFromOp(spec, op);
+    for (const m of msgs) {
+      // push χωρίς dedupe για αρχή (ή χρησιμοποίησε map με key `${m.title}|${m.contentType}`)
+      Message.push({
+        title: m.title,
+        name: m.name,
+        summary: m.summary,
+        contentType: m.contentType,
+        schemaFormat: m.schemaFormat
+      });
+    }
+  }
+
+  // Components / Security / Tag
+  const Component = extractComponents(spec);
+  const Security = extractSecurity(spec);
+  const Tag = extractTags(spec, info);
+
+  const AsyncService = [
+    {
+      id,
+      title: info.title || 'Untitled API',
+      version: info.version || '',
+      description: info.description || '',
+      defaultContentType: spec.defaultContentType,
+      asyncapiVersion: spec.asyncapi || spec.version,
+      termsOfService: info.termsOfService,
+      contactName: info.contact?.name,
+      contactEmail: info.contact?.email,
+      contactUrl: info.contact?.url,
+      licenseName: info.license?.name,
+      licenseUrl: info.license?.url,
+      externalDocsDescription: spec.externalDocs?.description,
+      externalDocsUrl: spec.externalDocs?.url,
+      // sub-tables
+      Server,
+      Channel,
+      Component,
+      Tag,
+      Security,
+      // προαιρετικά: αν θες να συμπεριλάβεις το collection των messages
+      Message
+    }
   ];
 
-  const result = {};
-
-  sections.forEach((section) => {
-    const definition = components[section];
-    const keys = definition && typeof definition === 'object' ? Object.keys(definition) : [];
-    if (keys.length) {
-      result[section] = keys;
-    }
-  });
-
-  if (Object.keys(result).length === 0) {
-    return {};
-  }
-
-  return { has: true, ...result };
-};
-
-const extractSecuritySchemes = (spec) => {
-  const schemes = spec.components?.securitySchemes || {};
-
-  return Object.entries(schemes).map(([name, scheme]) => {
-    const flowsSource = scheme?.flows && typeof scheme.flows === 'object' ? scheme.flows : {};
-    const flows = Object.entries(flowsSource).reduce((acc, [flowName, flow]) => {
-      acc[flowName] = sanitize({
-        authorizationUrl: cleanStr(flow?.authorizationUrl),
-        tokenUrl: cleanStr(flow?.tokenUrl),
-        refreshUrl: cleanStr(flow?.refreshUrl),
-        scopes: Object.keys(flow?.scopes || {})
-      });
-      return acc;
-    }, {});
-
-    return sanitize({
-      name,
-      type: cleanStr(scheme?.type),
-      description: cleanStr(scheme?.description),
-      scheme: cleanStr(scheme?.scheme),
-      bearerFormat: cleanStr(scheme?.bearerFormat),
-      openIdConnectUrl: cleanStr(scheme?.openIdConnectUrl),
-      in: cleanStr(scheme?.in),
-      keyName: cleanStr(scheme?.name),
-      flows: Object.keys(flows).length ? flows : undefined
-    });
-  });
-};
-
-const normalizeChannelReference = (channel) => {
-  if (typeof channel === 'string') {
-    return channel;
-  }
-
-  if (channel?.name) {
-    return channel.name;
-  }
-
-  if (channel?.$ref) {
-    const ref = channel.$ref;
-    if (ref.startsWith('#/channels/')) {
-      const suffix = ref.slice('#/channels/'.length);
-      return suffix
-        .split('/')
-        .map(decodePointerSegment)
-        .join('/');
-    }
-    return ref;
-  }
-
-  return undefined;
-};
-
-const extractOperationMessages = (operation) => {
-  if (!operation || typeof operation !== 'object') {
-    return [];
-  }
-
-  if (Array.isArray(operation.messages)) {
-    return operation.messages;
-  }
-
-  if (operation.message != null) {
-    return asArray(operation.message);
-  }
-
-  return [];
-};
-
-const collectOperations = (spec) => {
-  const operations = [];
-  const rootOperations = spec.operations;
-
-  if (Array.isArray(rootOperations)) {
-    rootOperations.forEach((operation) => {
-      operations.push({
-        action: cleanStr(operation?.action),
-        operationId: cleanStr(operation?.operationId),
-        channel: normalizeChannelReference(operation?.channel),
-        summary: cleanStr(operation?.summary),
-        description: cleanStr(operation?.description),
-        messages: extractOperationMessages(operation)
-      });
-    });
-  } else if (rootOperations && typeof rootOperations === 'object') {
-    Object.entries(rootOperations).forEach(([operationId, operation]) => {
-      operations.push({
-        action: cleanStr(operation?.action),
-        operationId: cleanStr(operation?.operationId) || cleanStr(operationId),
-        channel: normalizeChannelReference(operation?.channel),
-        summary: cleanStr(operation?.summary),
-        description: cleanStr(operation?.description),
-        messages: extractOperationMessages(operation)
-      });
-    });
-  }
-
-  Object.entries(spec.channels || {}).forEach(([channelName, channel]) => {
-    if (Array.isArray(channel?.operations)) {
-      channel.operations.forEach((operation) => {
-        operations.push({
-          action: cleanStr(operation?.action),
-          operationId: cleanStr(operation?.operationId),
-          channel: channelName,
-          summary: cleanStr(operation?.summary),
-          description: cleanStr(operation?.description),
-          messages: extractOperationMessages(operation)
-        });
-      });
-    } else if (channel?.operations && typeof channel.operations === 'object') {
-      Object.entries(channel.operations).forEach(([action, operation]) => {
-        operations.push({
-          action: cleanStr(operation?.action) || cleanStr(action),
-          operationId: cleanStr(operation?.operationId),
-          channel: channelName,
-          summary: cleanStr(operation?.summary),
-          description: cleanStr(operation?.description),
-          messages: extractOperationMessages(operation)
-        });
-      });
-    }
-
-    if (channel?.publish) {
-      operations.push({
-        action: 'publish',
-        operationId: cleanStr(channel.publish.operationId),
-        channel: channelName,
-        summary: cleanStr(channel.publish.summary),
-        description: cleanStr(channel.publish.description),
-        messages: extractOperationMessages(channel.publish)
-      });
-    }
-
-    if (channel?.subscribe) {
-      operations.push({
-        action: 'subscribe',
-        operationId: cleanStr(channel.subscribe.operationId),
-        channel: channelName,
-        summary: cleanStr(channel.subscribe.summary),
-        description: cleanStr(channel.subscribe.description),
-        messages: extractOperationMessages(channel.subscribe)
-      });
-    }
-  });
-
-  return operations;
-};
-
-const createMessageEntry = (spec, message, fallbackName, defaultContentType) => {
-  if (!message || typeof message !== 'object') {
-    return null;
-  }
-
-  const resolved = resolveMessageObject(spec, message);
-  const source = resolved && resolved !== message ? { ...resolved, ...message } : message;
-
-  const entry = sanitize({
-    name: cleanStr(source.name) || cleanStr(fallbackName),
-    title: cleanStr(source.title) || cleanStr(source.name) || cleanStr(fallbackName),
-    summary: cleanStr(source.summary),
-    messageId: cleanStr(source.messageId),
-    contentType: cleanStr(source.contentType) || cleanStr(defaultContentType),
-    schemaFormat: cleanStr(source.schemaFormat),
-    correlationId: source.correlationId,
-    headers: source.headers,
-    payload: source.payload,
-    bindings: source.bindings,
-    traits: Array.isArray(source.traits) ? source.traits : undefined,
-    examples: Array.isArray(source.examples) ? source.examples : undefined
-  });
-
-  if (!entry || Object.keys(entry).length === 0) {
-    return null;
-  }
-
-  return entry;
-};
-
-const extractMessages = (spec) => {
-  const operations = collectOperations(spec);
-  const defaultContentType = cleanStr(spec.defaultContentType);
-  const registry = new Map();
-
-  const addMessage = (message, fallbackName) => {
-    const entry = createMessageEntry(spec, message, fallbackName, defaultContentType);
-    if (!entry) {
-      return;
-    }
-
-    const key = [entry.name, entry.title, entry.contentType].filter(Boolean).join('|');
-    if (!registry.has(key)) {
-      registry.set(key, entry);
-    }
-  };
-
-  const componentMessages = spec.components?.messages || {};
-  Object.entries(componentMessages).forEach(([name, message]) => {
-    const fallbackName = cleanStr(name);
-    addMessage({ ...message, name: message?.name || fallbackName }, fallbackName);
-  });
-
-  operations.forEach((operation) => {
-    extractOperationMessages(operation).forEach((message) => addMessage(message));
-  });
-
-  return Array.from(registry.values());
-};
-
-const buildAsyncService = (spec = {}, explicitId) => {
-  const info = spec.info || {};
-  const asyncapiVersion = cleanStr(spec.asyncapi || spec.version);
-
-  const service = {
-    id: explicitId || spec.id || spec['x-id'] || uuidv4(),
-    title: cleanStr(info.title) || 'Untitled API',
-    version: cleanStr(info.version) || '',
-    description: cleanStr(info.description) || '',
-    defaultContentType: cleanStr(spec.defaultContentType),
-    asyncapiVersion,
-    termsOfService: cleanStr(info.termsOfService),
-    contactName: cleanStr(info.contact?.name),
-    contactEmail: cleanStr(info.contact?.email),
-    contactUrl: cleanStr(info.contact?.url),
-    licenseName: cleanStr(info.license?.name),
-    licenseUrl: cleanStr(info.license?.url),
-    externalDocsDescription: cleanStr(spec.externalDocs?.description),
-    externalDocsUrl: cleanStr(spec.externalDocs?.url),
-    Server: extractServers(spec),
-    Channel: extractChannels(spec),
-    Component: extractComponents(spec),
-    Tag: extractTags(spec),
-    Security: extractSecuritySchemes(spec),
-    Message: extractMessages(spec)
-  };
-
-  return { AsyncService: [sanitize(service)] };
-};
+  return { AsyncService };
+}
 
 module.exports = { buildAsyncService };

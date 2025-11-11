@@ -307,12 +307,17 @@ class AsyncAPIProcessor {
     filePath,
     originalId = null,
     normalizedId = null,
+    flattened = null,
     asyncServiceDoc = null,
     extra = {}
   } = {}) {
     if (!spec) throw new Error('Missing spec for metada insert');
     await this.db.connect();
     const metada = this.db.getCollection('metada');
+
+    const flat = flattened || this.flattenMetadata(spec);
+    const protocols = Array.isArray(flat?.protocols) ? flat.protocols : [];
+    const primaryProtocol = protocols.find(Boolean);
 
     const asyncServiceData = asyncServiceDoc || buildAsyncService(spec);
     const asyncServiceArray = Array.isArray(asyncServiceData?.AsyncService)
@@ -321,6 +326,9 @@ class AsyncAPIProcessor {
     const asyncServiceEntry = asyncServiceArray[0] || null;
 
     const doc = {
+      ...flat,
+      protocol: flat?.protocol || primaryProtocol,
+      protocols,
       AsyncService: asyncServiceArray,
       asyncService: asyncServiceEntry,
       asyncServiceId: asyncServiceEntry?.id,
@@ -331,6 +339,10 @@ class AsyncAPIProcessor {
       updatedAt: new Date(),
       ...extra
     };
+
+    if (doc.protocol == null && Array.isArray(asyncServiceEntry?.Server)) {
+      doc.protocol = asyncServiceEntry.Server.map((server) => server?.protocol).find(Boolean);
+    }
 
     const { insertedId } = await metada.insertOne(doc);
     return insertedId;
@@ -366,6 +378,7 @@ class AsyncAPIProcessor {
         spec: conversion.document,
         filePath,
         originalId,
+        flattened,
         asyncServiceDoc: asyncService
         // normalizedId: αν αργότερα δημιουργείς doc στη normalized συλλογή, πέρασέ το εδώ
       });
