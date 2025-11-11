@@ -2,6 +2,7 @@ const fs = require('fs-extra');
 const { Parser } = require('@asyncapi/parser');
 const { convert } = require('@asyncapi/converter');
 const yaml = require('yaml');
+const { buildAsyncService } = require('../../lib/async-service-builder');
 
 // DB config (προσαρμόσε το path αν το αρχείο σου είναι αλλού)
 const DatabaseConfig = require('../config/database');
@@ -16,6 +17,10 @@ class AsyncAPIProcessor {
     this.supportedFormats = ['yaml', 'json', 'yml'];
     // δέχεται dependency injection για tests (mock) ή χρησιμοποιεί το κανονικό DB
     this.db = db || DatabaseConfig;
+
+    // Backwards compatibility aliases (παλαιότερα scripts/cli calls)
+    this.processAsyncAPIFile = this.processAsyncAPIFile.bind(this);
+    this.processFile = this.process.bind(this);
   }
 
   /** Load file from disk as UTF-8 string */
@@ -297,21 +302,20 @@ class AsyncAPIProcessor {
   /**
    * Store flattened metadata into 'metada' collection
    */
-  async saveMetada({ spec, filePath, originalId = null, normalizedId = null, extra = {} } = {}) {
+  async saveMetada({ spec, asyncServiceDoc = null } = {}) {
     if (!spec) throw new Error('Missing spec for metada insert');
     await this.db.connect();
     const metada = this.db.getCollection('metada');
 
-    const flat = this.flattenMetadata(spec);
+    const asyncServiceData = asyncServiceDoc || buildAsyncService(spec);
+    const asyncServiceArray = Array.isArray(asyncServiceData?.AsyncService)
+      ? asyncServiceData.AsyncService
+      : [];
 
     const doc = {
-      ...flat,
-      originalId: originalId || null,
-      normalizedId: normalizedId || null,
-      filePath,
+      AsyncService: asyncServiceArray,
       createdAt: new Date(),
-      updatedAt: new Date(),
-      ...extra
+      updatedAt: new Date()
     };
 
     const { insertedId } = await metada.insertOne(doc);
@@ -341,13 +345,12 @@ class AsyncAPIProcessor {
       const summary = this.buildSummary(conversion.document);
       const searchableFields = this.buildSearchableFields(summary);
       const flattened = this.flattenMetadata(conversion.document);
+      const asyncService = buildAsyncService(conversion.document);
 
       // 4) Save metada
       const metadaId = await this.saveMetada({
         spec: conversion.document,
-        filePath,
-        originalId
-        // normalizedId: αν αργότερα δημιουργείς doc στη normalized συλλογή, πέρασέ το εδώ
+        asyncServiceDoc: asyncService
       });
       console.log(`🧾 Stored metada with _id: ${metadaId}`);
 
@@ -360,6 +363,7 @@ class AsyncAPIProcessor {
         summary,
         searchableFields,
         flattened,
+        asyncService,
         validation,
         originalId,
         metadaId
@@ -373,6 +377,12 @@ class AsyncAPIProcessor {
   async processAsyncAPIFile(filePath, targetFormat = 'json') {
     return this.process(filePath, targetFormat);
   }
+
+  async processAsyncAPI(filePath, targetFormat = 'json') {
+    return this.processAsyncAPIFile(filePath, targetFormat);
+  }
 }
 
 module.exports = AsyncAPIProcessor;
+module.exports.AsyncAPIProcessor = AsyncAPIProcessor;
+module.exports.default = AsyncAPIProcessor;

@@ -101,7 +101,11 @@ class DatabaseSetup {
           continue;
         }
 
-        const processed = await this.asyncapiProcessor.processAsyncAPIFile(filePath, 'json');
+        const processorFn = typeof this.asyncapiProcessor.processAsyncAPIFile === 'function'
+          ? this.asyncapiProcessor.processAsyncAPIFile
+          : this.asyncapiProcessor.process;
+
+        const processed = await processorFn.call(this.asyncapiProcessor, filePath, 'json');
         const importTimestamp = new Date();
 
         const normalizedDocument = {
