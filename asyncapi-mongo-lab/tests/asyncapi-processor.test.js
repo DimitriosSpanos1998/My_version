@@ -14,13 +14,14 @@ describe('AsyncAPI MongoDB Lab Tests', () => {
 
     await Promise.all([
       mongoService.getCollection('normalized').deleteMany({}),
-      mongoService.getCollection('original').deleteMany({})
+      mongoService.getCollection('original').deleteMany({}),
+      mongoService.getCollection('metada').deleteMany({})
     ]);
   };
 
   beforeAll(async () => {
-    processor = new AsyncAPIProcessor();
     mockConfig = createMockDatabaseConfig();
+    processor = new AsyncAPIProcessor({ db: mockConfig });
     mongoService = new MongoService(mockConfig);
     await mongoService.connect();
   });
@@ -42,6 +43,8 @@ describe('AsyncAPI MongoDB Lab Tests', () => {
       expect(result.normalized).toBeDefined();
       expect(result.summary.title).toBe('User Service API');
       expect(result.summary.version).toBe('1.0.0');
+      expect(Array.isArray(result.asyncService?.AsyncService)).toBe(true);
+      expect(result.asyncService.AsyncService[0].title).toBe('User Service API');
     });
 
     test('should validate AsyncAPI specification', () => {
