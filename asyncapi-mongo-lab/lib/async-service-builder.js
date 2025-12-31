@@ -216,7 +216,23 @@ function extractSecurity(spec) {
  */
 function buildAsyncService(spec, explicitId) {
   const info = spec.info || {};
-  const id = explicitId || spec.id || spec['x-id'] || uuidv4();
+  let id = explicitId || spec.id || spec['x-id'];
+
+  if (!id) {
+    const hashInput = JSON.stringify({
+      title: info.title || '',
+      version: info.version || '',
+      asyncapi: spec.asyncapi || spec.version || '',
+      description: info.description || '',
+      servers: spec.servers || {},
+      channels: spec.channels || {}
+    });
+    id = `asyncapi-${crypto.createHash('sha256').update(hashInput).digest('hex').slice(0, 32)}`;
+  }
+
+  if (!id) {
+    id = uuidv4();
+  }
 
   // Servers / Channels
   const Server = extractServers(spec);
