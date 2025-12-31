@@ -324,6 +324,7 @@ class AsyncAPIProcessor {
       ? asyncServiceData.AsyncService
       : [];
     const asyncServiceEntry = asyncServiceArray[0] || null;
+    const now = new Date();
 
     const doc = {
       ...flat,
@@ -334,17 +335,32 @@ class AsyncAPIProcessor {
       asyncServiceId: asyncServiceEntry?.id,
       originalId: originalId || null,
       normalizedId: normalizedId || null,
-      filePath,
-      createdAt: new Date(),
-      updatedAt: new Date()
+      filePath
     };
 
     if (doc.protocol == null && Array.isArray(asyncServiceEntry?.Server)) {
       doc.protocol = asyncServiceEntry.Server.map((server) => server?.protocol).find(Boolean);
     }
 
-    const { insertedId } = await metada.insertOne(doc);
-    return insertedId;
+    const dedupeFilter = asyncServiceEntry?.id
+      ? { asyncServiceId: asyncServiceEntry.id }
+      : { title: flat.title, version: flat.version, filePath };
+
+    const result = await metada.findOneAndUpdate(
+      dedupeFilter,
+      {
+        $set: {
+          ...doc,
+          updatedAt: now
+        },
+        $setOnInsert: {
+          createdAt: now
+        }
+      },
+      { upsert: true, returnDocument: 'after' }
+    );
+
+    return result?.value?._id || result?.lastErrorObject?.upserted;
   }
 
   /** End-to-end helper: load → parse → validate → convert → normalize → summarize → persist originals & metada */
