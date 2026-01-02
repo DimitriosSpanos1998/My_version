@@ -105,7 +105,9 @@ class DatabaseSetup {
           ? this.asyncapiProcessor.processAsyncAPIFile
           : this.asyncapiProcessor.process;
 
-        const processed = await processorFn.call(this.asyncapiProcessor, filePath, 'json');
+        const processed = await processorFn.call(this.asyncapiProcessor, filePath, 'json', {
+          persistOriginal: false
+        });
         const importTimestamp = new Date();
 
         const normalizedDocument = {
@@ -168,14 +170,17 @@ class DatabaseSetup {
       await this.mongoService.connect();
       const normalizedCollection = this.mongoService.getCollection('normalized');
       const originalCollection = this.mongoService.getCollection('original');
+      const metadaCollection = this.mongoService.getCollection('metada');
 
-      const [normalizedResult, originalResult] = await Promise.all([
+      const [normalizedResult, originalResult, metadaResult] = await Promise.all([
         normalizedCollection.deleteMany({}),
-        originalCollection.deleteMany({})
+        originalCollection.deleteMany({}),
+        metadaCollection.deleteMany({})
       ]);
 
       console.log(`🗑️ Deleted ${normalizedResult.deletedCount} normalized documents`);
       console.log(`🗑️ Deleted ${originalResult.deletedCount} original documents`);
+      console.log(`🗑️ Deleted ${metadaResult.deletedCount} metada documents`);
 
       console.log('✅ Database cleaned successfully!');
     } catch (error) {
@@ -196,14 +201,17 @@ class DatabaseSetup {
       await this.mongoService.connect();
       const normalizedCollection = this.mongoService.getCollection('normalized');
       const originalCollection = this.mongoService.getCollection('original');
+      const metadaCollection = this.mongoService.getCollection('metada');
 
-      const [normalizedCount, originalCount] = await Promise.all([
+      const [normalizedCount, originalCount, metadaCount] = await Promise.all([
         normalizedCollection.countDocuments(),
-        originalCollection.countDocuments()
+        originalCollection.countDocuments(),
+        metadaCollection.countDocuments()
       ]);
 
       console.log(`📈 Normalized documents: ${normalizedCount}`);
       console.log(`📈 Original documents: ${originalCount}`);
+      console.log(`📈 Metada documents: ${metadaCount}`);
 
       if (normalizedCount > 0) {
         const stats = await this.mongoService.getDocumentStatistics();

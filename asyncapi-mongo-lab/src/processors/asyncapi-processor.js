@@ -364,14 +364,20 @@ class AsyncAPIProcessor {
   }
 
   /** End-to-end helper: load → parse → validate → convert → normalize → summarize → persist originals & metada */
-  async process(filePath, targetFormat = 'json') {
+  async process(filePath, targetFormat = 'json', options = {}) {
     try {
       console.log(`🚀 Starting AsyncAPI processing for: ${filePath}`);
       const original = await this.load(filePath);
 
+      const { persistOriginal = true, persistMetada = true } = options;
+      let originalId = null;
+      let metadaId = null;
+
       // 1) Save original as-is
-      const originalId = await this.saveOriginal({ filePath, originalContent: original });
-      console.log(`🗄️ Stored original with _id: ${originalId}`);
+      if (persistOriginal) {
+        originalId = await this.saveOriginal({ filePath, originalContent: original });
+        console.log(`🗄️ Stored original with _id: ${originalId}`);
+      }
 
       // 2) Parse/validate
       const parsed = await this.parse(original);
@@ -389,15 +395,17 @@ class AsyncAPIProcessor {
       const asyncService = buildAsyncService(conversion.document);
 
       // 4) Save metada
-      const metadaId = await this.saveMetada({
-        spec: conversion.document,
-        filePath,
-        originalId,
-        flattened,
-        asyncServiceDoc: asyncService
-        // normalizedId: αν αργότερα δημιουργείς doc στη normalized συλλογή, πέρασέ το εδώ
-      });
-      console.log(`🧾 Stored metada with _id: ${metadaId}`);
+      if (persistMetada) {
+        metadaId = await this.saveMetada({
+          spec: conversion.document,
+          filePath,
+          originalId,
+          flattened,
+          asyncServiceDoc: asyncService
+          // normalizedId: αν αργότερα δημιουργείς doc στη normalized συλλογή, πέρασέ το εδώ
+        });
+        console.log(`🧾 Stored metada with _id: ${metadaId}`);
+      }
 
       console.log('✅ AsyncAPI processing completed successfully');
       return {
