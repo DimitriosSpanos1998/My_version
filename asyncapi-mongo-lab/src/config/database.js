@@ -13,6 +13,11 @@ class DatabaseConfig {
    * @returns {Object} Collection names keyed by logical type
    */
   getCollectionNames() {
+    const metadataCollectionName =
+      process.env.METADATA_COLLECTION_NAME ||
+      process.env.METADA_COLLECTION_NAME ||
+      'asyncapi_metada';
+
     return {
       original: process.env.ORIGINAL_COLLECTION_NAME || 'asyncapi_originals',
       normalized:
@@ -20,7 +25,8 @@ class DatabaseConfig {
         process.env.COLLECTION_NAME ||
         'asyncapi_normalized',
       // 👇 ΝΕΟ: συλλογή metadata
-      metada: process.env.METADA_COLLECTION_NAME || 'asyncapi_metada'
+      metada: metadataCollectionName,
+      metadata: metadataCollectionName
     };
   }
 
