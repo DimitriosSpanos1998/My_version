@@ -61,7 +61,9 @@ class AsyncAPIMongoLab {
           ? this.processor.processAsyncAPIFile
           : this.processor.process;
 
-        const result = await processorFn.call(this.processor, filePath, 'json');
+        const result = await processorFn.call(this.processor, filePath, 'json', {
+          persistOriginal: false
+        });
 
         // Insert into MongoDB (normalized summary plus original documents)
         const insertResult = await this.mongoService.insertAsyncAPIDocument(result);
