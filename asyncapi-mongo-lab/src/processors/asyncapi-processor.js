@@ -10,19 +10,12 @@ const DatabaseConfig = require('../config/database');
 // --- Small helpers ---------------------------------------------------------
 const ensureArray = (v) => (Array.isArray(v) ? v : v == null ? [] : [v]);
 const lc = (s) => (typeof s === 'string' ? s.toLowerCase() : '');
-const getHostFromUrl = (value) => {
-  if (typeof value !== 'string' || !value.trim()) {
-    return undefined;
-  }
-
-  const trimmed = value.trim();
+const getHostFromUrl = (url) => {
+  if (typeof url !== 'string' || url.length === 0) return undefined;
   try {
-    const url = new URL(trimmed);
-    return url.host || undefined;
+    return new URL(url).host;
   } catch (error) {
-    const withoutScheme = trimmed.replace(/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//, '');
-    const host = withoutScheme.split(/[/?#]/)[0];
-    return host || undefined;
+    return url;
   }
 };
 
