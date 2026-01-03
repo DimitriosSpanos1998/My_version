@@ -167,7 +167,10 @@ class MongoService {
     const now = new Date();
     let rawContent = null;
     let metadata = null;
-    let converted = undefined;
+    let converted =
+      asyncAPIData?.converted ??
+      asyncAPIData?.conversion?.content ??
+      undefined;
     let filePath =
       asyncAPIData.filePath ??
       asyncAPIData?.source?.relativePath ??
@@ -345,6 +348,10 @@ class MongoService {
   buildOriginalDocument(original, normalizedDocument, normalizedId, asyncAPIData = {}) {
     const { now, rawContent, metadata, converted, filePath } =
       this.extractOriginalDetails(original, { ...asyncAPIData, normalized: normalizedDocument });
+
+    if (!rawContent || converted === undefined) {
+      return null;
+    }
 
     const originalDocument = {
       normalizedId,
