@@ -106,13 +106,16 @@ class AsyncAPIProcessor {
     };
 
     // servers
-    const servers = Object.entries(serversObj).map(([name, s]) => ({
-      name,
-      url: s?.url,
-      host: getHostFromUrl(s?.url),
-      protocol: s?.protocol,
-      description: s?.description
-    }));
+    const servers = Object.entries(serversObj).map(([name, s]) => {
+      const serverUrl = s?.url;
+      return {
+        name,
+        url: serverUrl,
+        host: s?.host ?? getHostFromUrl(serverUrl) ?? serverUrl,
+        protocol: s?.protocol,
+        description: s?.description
+      };
+    });
 
     // channels
     const channels = Object.entries(channelsObj).map(([name, ch]) => ({
