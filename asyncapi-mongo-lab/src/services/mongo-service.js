@@ -163,6 +163,92 @@ class MongoService {
     return originalId;
   }
 
+  extractOriginalDetails(original, asyncAPIData = {}) {
+    const now = new Date();
+    let rawContent = null;
+    let metadata = null;
+    let converted = undefined;
+    let filePath =
+      asyncAPIData.filePath ??
+      asyncAPIData?.source?.relativePath ??
+      asyncAPIData?.source?.filePath ??
+      null;
+
+    if (typeof original === 'string') {
+      rawContent = original;
+    } else if (original && typeof original === 'object' && !Array.isArray(original)) {
+      const cloned = JSON.parse(JSON.stringify(original));
+
+      if (typeof cloned.raw === 'string') {
+        rawContent = cloned.raw;
+        delete cloned.raw;
+      }
+
+      if (!rawContent && typeof cloned.rawContent === 'string') {
+        rawContent = cloned.rawContent;
+        delete cloned.rawContent;
+      }
+
+      if (!rawContent && typeof cloned.content === 'string') {
+        rawContent = cloned.content;
+        delete cloned.content;
+      }
+
+      if (cloned.converted !== undefined) {
+        converted = cloned.converted;
+        delete cloned.converted;
+      }
+
+      if (!filePath && typeof cloned.filePath === 'string') {
+        filePath = cloned.filePath;
+        delete cloned.filePath;
+      }
+
+      if (!filePath && typeof cloned.relativePath === 'string') {
+        filePath = cloned.relativePath;
+        delete cloned.relativePath;
+      }
+
+      if (!filePath && typeof cloned.filename === 'string') {
+        filePath = cloned.filename;
+        delete cloned.filename;
+      }
+
+      if (cloned._id) {
+        delete cloned._id;
+      }
+
+      if (Object.keys(cloned).length > 0) {
+        metadata = cloned;
+      }
+    }
+
+    if (!rawContent && asyncAPIData?.normalized) {
+      rawContent = JSON.stringify(asyncAPIData.normalized, null, 2);
+    }
+
+    return {
+      now,
+      rawContent,
+      metadata,
+      converted,
+      filePath
+    };
+  }
+
+  async findExistingOriginalId(original, asyncAPIData = {}) {
+    const { rawContent, filePath } = this.extractOriginalDetails(original, asyncAPIData);
+
+    if (!rawContent) {
+      return null;
+    }
+
+    const originalCollection = this.getOriginalCollection();
+    const filter = filePath ? { raw: rawContent, filePath } : { raw: rawContent };
+    const existing = await originalCollection.findOne(filter, { projection: { _id: 1 } });
+    return existing?._id ?? null;
+  }
+
   /**
    * Insert AsyncAPI document across collections
    * @param {Object} asyncAPIData - AsyncAPI processing result or normalized document
@@ -189,10 +275,13 @@ class MongoService {
 
       normalizedResult = await normalizedCollection.insertOne(normalizedDocument);
 
-      if (existingOriginalId) {
+      const resolvedOriginalId =
+        existingOriginalId ?? (await this.findExistingOriginalId(original, asyncAPIData));
+
+      if (resolvedOriginalId) {
         const now = new Date();
         await originalCollection.updateOne(
-          { _id: existingOriginalId },
+          { _id: resolvedOriginalId },
           {
             $set: {
               normalizedId: normalizedResult.insertedId,
@@ -200,12 +289,13 @@ class MongoService {
             }
           }
         );
-        originalId = existingOriginalId;
+        originalId = resolvedOriginalId;
       } else {
         const originalDocument = this.buildOriginalDocument(
           original,
           normalizedDocument,
-          normalizedResult.insertedId
+          normalizedResult.insertedId,
+          asyncAPIData
         );
 
         if (originalDocument) {
@@ -252,49 +342,9 @@ class MongoService {
     return originalContent;
   }
 
-  buildOriginalDocument(original, normalizedDocument, normalizedId) {
-    const now = new Date();
-    let rawContent = null;
-    let metadata = null;
-    let converted = undefined;
-
-    if (typeof original === 'string') {
-      rawContent = original;
-    } else if (original && typeof original === 'object' && !Array.isArray(original)) {
-      const cloned = JSON.parse(JSON.stringify(original));
-
-      if (typeof cloned.raw === 'string') {
-        rawContent = cloned.raw;
-        delete cloned.raw;
-      }
-
-      if (!rawContent && typeof cloned.rawContent === 'string') {
-        rawContent = cloned.rawContent;
-        delete cloned.rawContent;
-      }
-
-      if (!rawContent && typeof cloned.content === 'string') {
-        rawContent = cloned.content;
-        delete cloned.content;
-      }
-
-      if (cloned.converted !== undefined) {
-        converted = cloned.converted;
-        delete cloned.converted;
-      }
-
-      if (cloned._id) {
-        delete cloned._id;
-      }
-
-      if (Object.keys(cloned).length > 0) {
-        metadata = cloned;
-      }
-    }
-
-    if (!rawContent && normalizedDocument) {
-      rawContent = JSON.stringify(normalizedDocument, null, 2);
-    }
+  buildOriginalDocument(original, normalizedDocument, normalizedId, asyncAPIData = {}) {
+    const { now, rawContent, metadata, converted, filePath } =
+      this.extractOriginalDetails(original, { ...asyncAPIData, normalized: normalizedDocument });
 
     const originalDocument = {
       normalizedId,
@@ -302,6 +352,10 @@ class MongoService {
       updatedAt: now,
       raw: rawContent
     };
+
+    if (filePath) {
+      originalDocument.filePath = filePath;
+    }
 
     if (metadata) {
       originalDocument.metadata = metadata;

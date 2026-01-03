@@ -409,6 +409,7 @@ class AsyncAPIProcessor {
 
       console.log('✅ AsyncAPI processing completed successfully');
       return {
+        filePath,
         original,
         parsed,
         converted: conversion.content,
