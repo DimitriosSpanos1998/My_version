@@ -276,9 +276,15 @@ class AsyncAPIProcessor {
   }
 
   /**
-   * Store the original file (raw string) into 'original' collection
+   * Store the original file (raw + converted) into 'original' collection
    */
-  async saveOriginal({ filePath, originalContent, normalizedId = null, extra = {} } = {}) {
+  async saveOriginal({
+    filePath,
+    originalContent,
+    convertedContent,
+    normalizedId = null,
+    extra = {}
+  } = {}) {
     await this.db.connect();
     const originals = this.db.getCollection('original');
 
@@ -288,6 +294,7 @@ class AsyncAPIProcessor {
     const doc = {
       normalizedId: normalizedId || null,
       raw: originalContent,   // as-is
+      converted: convertedContent,
       format,
       contentType,
       filePath,
@@ -373,26 +380,30 @@ class AsyncAPIProcessor {
       let originalId = null;
       let metadaId = null;
 
-      // 1) Save original as-is
-      if (persistOriginal) {
-        originalId = await this.saveOriginal({ filePath, originalContent: original });
-        console.log(`🗄️ Stored original with _id: ${originalId}`);
-      }
-
-      // 2) Parse/validate
+      // 1) Parse/validate
       const parsed = await this.parse(original);
       const validation = this.validateAsyncAPI(parsed);
       if (!validation.isValid) {
         throw new Error(`Validation failed: ${validation.errors.join(', ')}`);
       }
 
-      // 3) Convert (to v3 if needed) and normalize/summary/searchFields/flatten
+      // 2) Convert (to v3 if needed) and normalize/summary/searchFields/flatten
       const conversion = await this.convert(original, parsed, targetFormat);
       const normalized = this.normalize(conversion.document);
       const summary = this.buildSummary(conversion.document);
       const searchableFields = this.buildSearchableFields(summary);
       const flattened = this.flattenMetadata(conversion.document);
       const asyncService = buildAsyncService(conversion.document);
+
+      // 3) Save original as-is + converted content
+      if (persistOriginal) {
+        originalId = await this.saveOriginal({
+          filePath,
+          originalContent: original,
+          convertedContent: conversion.content
+        });
+        console.log(`🗄️ Stored original with _id: ${originalId}`);
+      }
 
       // 4) Save metada
       if (persistMetada) {
