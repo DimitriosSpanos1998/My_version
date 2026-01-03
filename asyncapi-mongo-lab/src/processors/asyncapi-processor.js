@@ -10,6 +10,14 @@ const DatabaseConfig = require('../config/database');
 // --- Small helpers ---------------------------------------------------------
 const ensureArray = (v) => (Array.isArray(v) ? v : v == null ? [] : [v]);
 const lc = (s) => (typeof s === 'string' ? s.toLowerCase() : '');
+const getHostFromUrl = (url) => {
+  if (typeof url !== 'string' || url.length === 0) return undefined;
+  try {
+    return new URL(url).host;
+  } catch (error) {
+    return url;
+  }
+};
 
 // --- Core class ------------------------------------------------------------
 class AsyncAPIProcessor {
@@ -101,6 +109,7 @@ class AsyncAPIProcessor {
     const servers = Object.entries(serversObj).map(([name, s]) => ({
       name,
       url: s?.url,
+      host: getHostFromUrl(s?.url),
       protocol: s?.protocol,
       description: s?.description
     }));
