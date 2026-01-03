@@ -151,18 +151,34 @@ class MongoService {
     };
   }
 
+  resolveOriginalId(originalId) {
+    if (!originalId) {
+      return null;
+    }
+
+    if (typeof originalId === 'string') {
+      return new ObjectId(originalId);
+    }
+
+    return originalId;
+  }
+
   /**
    * Insert AsyncAPI document across collections
    * @param {Object} asyncAPIData - AsyncAPI processing result or normalized document
    * @returns {Promise<Object>} Insert result with identifiers
    */
   async insertAsyncAPIDocument(asyncAPIData) {
+    const existingOriginalId = this.resolveOriginalId(
+      asyncAPIData?.originalId ?? asyncAPIData?.original?._id ?? asyncAPIData?.original?.id
+    );
     const { normalized, summary, searchableFields, original } = this.prepareDocumentParts(asyncAPIData);
     const normalizedCollection = this.getNormalizedCollection();
     const originalCollection = this.getOriginalCollection();
 
     let normalizedResult;
     let originalResult;
+    let originalId = null;
 
     try {
       const normalizedDocument = {
@@ -173,14 +189,29 @@ class MongoService {
 
       normalizedResult = await normalizedCollection.insertOne(normalizedDocument);
 
-      const originalDocument = this.buildOriginalDocument(
-        original,
-        normalizedDocument,
-        normalizedResult.insertedId
-      );
+      if (existingOriginalId) {
+        const now = new Date();
+        await originalCollection.updateOne(
+          { _id: existingOriginalId },
+          {
+            $set: {
+              normalizedId: normalizedResult.insertedId,
+              updatedAt: now
+            }
+          }
+        );
+        originalId = existingOriginalId;
+      } else {
+        const originalDocument = this.buildOriginalDocument(
+          original,
+          normalizedDocument,
+          normalizedResult.insertedId
+        );
 
-      if (originalDocument) {
-        originalResult = await originalCollection.insertOne(originalDocument);
+        if (originalDocument) {
+          originalResult = await originalCollection.insertOne(originalDocument);
+          originalId = originalResult.insertedId;
+        }
       }
 
       console.log(`💾 Document inserted with ID: ${normalizedResult.insertedId}`);
@@ -189,7 +220,7 @@ class MongoService {
         success: true,
         insertedId: normalizedResult.insertedId,
         normalizedId: normalizedResult.insertedId,
-        originalId: originalResult ? originalResult.insertedId : null,
+        originalId,
         document: normalizedDocument
       };
     } catch (error) {
