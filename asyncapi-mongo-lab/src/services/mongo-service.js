@@ -157,6 +157,7 @@ class MongoService {
    * @returns {Promise<Object>} Insert result with identifiers
    */
   async insertAsyncAPIDocument(asyncAPIData) {
+    const existingOriginalId = asyncAPIData?.originalId ?? null;
     const { normalized, summary, searchableFields, original } = this.prepareDocumentParts(asyncAPIData);
     const normalizedCollection = this.getNormalizedCollection();
     const originalCollection = this.getOriginalCollection();
@@ -179,7 +180,22 @@ class MongoService {
         normalizedResult.insertedId
       );
 
-      if (originalDocument) {
+      if (existingOriginalId) {
+        const originalObjectId = existingOriginalId instanceof ObjectId
+          ? existingOriginalId
+          : new ObjectId(existingOriginalId);
+
+        await originalCollection.updateOne(
+          { _id: originalObjectId },
+          {
+            $set: {
+              normalizedId: normalizedResult.insertedId,
+              updatedAt: new Date()
+            }
+          }
+        );
+        originalResult = { insertedId: originalObjectId };
+      } else if (originalDocument) {
         originalResult = await originalCollection.insertOne(originalDocument);
       }
 
