@@ -30,17 +30,74 @@ function extractTags(spec, info) {
     }));
 }
 
+function buildSecuritySchemeDetails(name, scheme) {
+  if (!scheme || typeof scheme !== 'object') return null;
+  const out = {
+    name,
+    type: scheme?.type,
+    description: scheme?.description
+  };
+
+  if (scheme?.type === 'apiKey') {
+    out.in = scheme.in;
+    out.parameterName = scheme.name;
+  }
+
+  if (scheme?.type === 'http' || scheme?.type === 'HTTPSecurityScheme') {
+    out.scheme = scheme.scheme;
+    out.bearerFormat = scheme.bearerFormat;
+  }
+
+  if (scheme?.type === 'oauth2' || scheme?.type === 'oauth2Flows') {
+    out.flows = Object.fromEntries(
+      Object.entries(scheme.flows || {}).map(([fname, flow]) => [
+        fname,
+        {
+          authorizationUrl: flow.authorizationUrl,
+          tokenUrl: flow.tokenUrl,
+          refreshUrl: flow.refreshUrl,
+          scopes: Object.keys(flow.scopes || {})
+        }
+      ])
+    );
+  }
+
+  if (scheme?.type === 'openIdConnect') {
+    out.openIdConnectUrl = scheme.openIdConnectUrl;
+  }
+
+  if (scheme?.type === 'sasl' || scheme?.type === 'SaslSecurityScheme') {
+    out.mechanism = scheme.mechanism;
+  }
+
+  if (scheme?.type === 'symmetricEncryption' || scheme?.type === 'asymmetricEncryption') {
+    out.algorithm = scheme.algorithm;
+    out.format = scheme.format;
+    out.key = scheme.key;
+  }
+
+  return out;
+}
+
 function extractServers(spec) {
   const serversObj = spec.servers || {};
-  return Object.entries(serversObj).map(([name, s]) => ({
+  const securitySchemes = spec.components?.securitySchemes || {};
+  return Object.entries(serversObj).map(([name, s]) => {
+    const securityNames = asArray(s?.security)
+      .map((x) => (typeof x === 'object' ? Object.keys(x)[0] : x))
+      .filter(Boolean);
+    const resolvedSchemes = securityNames
+      .map((securityName) => buildSecuritySchemeDetails(securityName, securitySchemes[securityName]))
+      .filter(Boolean);
+
+    return {
     name,
     url: s?.url,
     protocol: s?.protocol,
     protocolVersion: s?.protocolVersion,
     description: s?.description,
-    security: asArray(s?.security)
-      .map((x) => (typeof x === 'object' ? Object.keys(x)[0] : x))
-      .filter(Boolean),
+    security: securityNames,
+    securitySchemes: resolvedSchemes.length > 0 ? resolvedSchemes : undefined,
     variables: s?.variables
       ? Object.entries(s.variables).map(([vn, v]) => ({
           name: vn,
@@ -50,7 +107,8 @@ function extractServers(spec) {
         }))
       : undefined,
     bindings: s?.bindings || undefined
-  }));
+    };
+  });
 }
 
 /** v2 publish/subscribe πάνω στο channel */
@@ -185,12 +243,16 @@ function extractComponents(spec) {
 function extractSecurity(spec) {
   const sec = spec.components?.securitySchemes || {};
   return Object.entries(sec).map(([name, s]) => {
-    const out = { name, type: s?.type };
-    if (s?.type === 'http') {
+    const out = { name, type: s?.type, description: s?.description };
+    if (s?.type === 'apiKey') {
+      out.in = s.in;
+      out.parameterName = s.name;
+    }
+    if (s?.type === 'http' || s?.type === 'HTTPSecurityScheme') {
       out.scheme = s.scheme;
       out.bearerFormat = s.bearerFormat;
     }
-    if (s?.type === 'oauth2') {
+    if (s?.type === 'oauth2' || s?.type === 'oauth2Flows') {
       out.flows = Object.fromEntries(
         Object.entries(s.flows || {}).map(([fname, flow]) => [
           fname,
@@ -206,7 +268,14 @@ function extractSecurity(spec) {
     if (s?.type === 'openIdConnect') {
       out.openIdConnectUrl = s.openIdConnectUrl;
     }
-    out.description = s?.description;
+    if (s?.type === 'sasl' || s?.type === 'SaslSecurityScheme') {
+      out.mechanism = s.mechanism;
+    }
+    if (s?.type === 'symmetricEncryption' || s?.type === 'asymmetricEncryption') {
+      out.algorithm = s.algorithm;
+      out.format = s.format;
+      out.key = s.key;
+    }
     return out;
   });
 }
