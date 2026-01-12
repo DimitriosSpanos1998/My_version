@@ -165,65 +165,35 @@ class MongoService {
 
   extractOriginalDetails(original, asyncAPIData = {}) {
     const now = new Date();
+    
+    // 1. Resolve File Path
+    let filePath = asyncAPIData.filePath || 
+                   asyncAPIData?.source?.relativePath || 
+                   asyncAPIData?.source?.filePath || 
+                   null;
+
+    // 2. Resolve Converted Content
+    let converted = asyncAPIData?.converted || asyncAPIData?.conversion?.content;
+
+    // 3. Resolve Raw Content & Metadata
     let rawContent = null;
     let metadata = null;
-    let converted =
-      asyncAPIData?.converted ??
-      asyncAPIData?.conversion?.content ??
-      undefined;
-    let filePath =
-      asyncAPIData.filePath ??
-      asyncAPIData?.source?.relativePath ??
-      asyncAPIData?.source?.filePath ??
-      null;
 
     if (typeof original === 'string') {
       rawContent = original;
     } else if (original && typeof original === 'object' && !Array.isArray(original)) {
-      const cloned = JSON.parse(JSON.stringify(original));
+      // Extract known fields, treat rest as metadata
+      const { 
+        raw, rawContent: rc, content, 
+        converted: c, filePath: fp, relativePath, filename, 
+        _id, ...rest 
+      } = original;
 
-      if (typeof cloned.raw === 'string') {
-        rawContent = cloned.raw;
-        delete cloned.raw;
-      }
-
-      if (!rawContent && typeof cloned.rawContent === 'string') {
-        rawContent = cloned.rawContent;
-        delete cloned.rawContent;
-      }
-
-      if (!rawContent && typeof cloned.content === 'string') {
-        rawContent = cloned.content;
-        delete cloned.content;
-      }
-
-      if (cloned.converted !== undefined) {
-        converted = cloned.converted;
-        delete cloned.converted;
-      }
-
-      if (!filePath && typeof cloned.filePath === 'string') {
-        filePath = cloned.filePath;
-        delete cloned.filePath;
-      }
-
-      if (!filePath && typeof cloned.relativePath === 'string') {
-        filePath = cloned.relativePath;
-        delete cloned.relativePath;
-      }
-
-      if (!filePath && typeof cloned.filename === 'string') {
-        filePath = cloned.filename;
-        delete cloned.filename;
-      }
-
-      if (cloned._id) {
-        delete cloned._id;
-      }
-
-      if (Object.keys(cloned).length > 0) {
-        metadata = cloned;
-      }
+      rawContent = raw || rc || content;
+      if (c !== undefined && converted === undefined) converted = c;
+      if (!filePath) filePath = fp || relativePath || filename;
+      
+      if (Object.keys(rest).length > 0) metadata = rest;
     }
 
     if (!rawContent && asyncAPIData?.normalized) {
@@ -609,31 +579,24 @@ class MongoService {
   async getDocumentStatistics() {
     try {
       const collection = this.getNormalizedCollection();
-      const documents = await collection.find({}).toArray();
-
-      const totals = documents.reduce(
-        (acc, doc) => {
-          const protocol = doc?.searchableFields?.protocol || 'unknown';
-          const version = doc?.searchableFields?.version || 'unknown';
-
-          acc.total += 1;
-          acc.protocol.set(protocol, (acc.protocol.get(protocol) || 0) + 1);
-          acc.version.set(version, (acc.version.get(version) || 0) + 1);
-
-          return acc;
-        },
-        { total: 0, protocol: new Map(), version: new Map() }
-      );
-
-      const toSortedDistribution = map =>
-        Array.from(map.entries())
-          .map(([key, count]) => ({ _id: key, count }))
-          .sort((a, b) => b.count - a.count);
+      
+      // Use MongoDB Aggregation for better performance
+      const [totalDocuments, protocolStats, versionStats] = await Promise.all([
+        collection.countDocuments(),
+        collection.aggregate([
+          { $group: { _id: { $ifNull: ["$searchableFields.protocol", "unknown"] }, count: { $sum: 1 } } },
+          { $sort: { count: -1 } }
+        ]).toArray(),
+        collection.aggregate([
+          { $group: { _id: { $ifNull: ["$searchableFields.version", "unknown"] }, count: { $sum: 1 } } },
+          { $sort: { count: -1 } }
+        ]).toArray()
+      ]);
 
       const stats = {
-        totalDocuments: totals.total,
-        protocolDistribution: toSortedDistribution(totals.protocol),
-        versionDistribution: toSortedDistribution(totals.version),
+        totalDocuments,
+        protocolDistribution: protocolStats,
+        versionDistribution: versionStats,
         lastUpdated: new Date()
       };
 
