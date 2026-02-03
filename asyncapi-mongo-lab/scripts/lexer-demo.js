@@ -12,7 +12,8 @@ const buildDir = path.join(lexerDir, "build");
 const cupJar = process.env.CUP_RUNTIME_JAR || process.env.CUP_JAR;
 
 function ensureBinary(binaryName, installHint) {
-  const result = spawnSync("which", [binaryName], { stdio: "ignore" });
+  const locator = process.platform === "win32" ? "where" : "which";
+  const result = spawnSync(locator, [binaryName], { stdio: "ignore" });
   if (result.status !== 0) {
     throw new Error(
       `Required tool not found on PATH: ${binaryName}. ${installHint || "Please install it and try again."}`
