@@ -10,7 +10,8 @@
     "test": "jest",
     "dev": "nodemon src/index.js",
     "clean": "node scripts/clean-db.js",
-    "drop-indexes": "node scripts/drop-indexes.js"
+    "drop-indexes": "node scripts/drop-indexes.js",
+    "lexer": "node scripts/lexer-demo.js"
   },
   "keywords": [
     "asyncapi",
