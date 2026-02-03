@@ -11,10 +11,12 @@ const buildDir = path.join(lexerDir, "build");
 
 const cupJar = process.env.CUP_RUNTIME_JAR || process.env.CUP_JAR;
 
-function ensureBinary(binaryName) {
+function ensureBinary(binaryName, installHint) {
   const result = spawnSync("which", [binaryName], { stdio: "ignore" });
   if (result.status !== 0) {
-    throw new Error(`Required tool not found on PATH: ${binaryName}`);
+    throw new Error(
+      `Required tool not found on PATH: ${binaryName}. ${installHint || "Please install it and try again."}`
+    );
   }
 }
 
@@ -35,9 +37,9 @@ function shouldRegenerateLexer() {
 }
 
 function main() {
-  ensureBinary("java");
-  ensureBinary("javac");
-  ensureBinary("jflex");
+  ensureBinary("java", "Install a JDK (Java 11+) and ensure java is available.");
+  ensureBinary("javac", "Install a JDK (Java 11+) and ensure javac is available.");
+  ensureBinary("jflex", "Install JFlex and ensure jflex is available.");
 
   if (!cupJar || !fs.existsSync(cupJar)) {
     throw new Error(
